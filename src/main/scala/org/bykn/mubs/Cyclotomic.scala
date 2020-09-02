@@ -1,6 +1,6 @@
 package org.bykn.mubs
 
-import algebra.ring.CommutativeRig
+import algebra.ring.CommutativeRing
 import shapeless.{Nat, Succ}
 import shapeless.ops.nat.ToInt
 import spire.math.{Complex, Natural, Real, Rational}
@@ -12,11 +12,7 @@ import spire.math.{Complex, Natural, Real, Rational}
  * See: https://encyclopediaofmath.org/wiki/Cyclotomic_field
  *
  */
-sealed abstract class Cyclotomic[N <: Nat, C] {
-  def add(left: C, right: C): C
-  def sub(left: C, right: C): C
-  def mult(left: C, right: C): C
-
+sealed abstract class Cyclotomic[N <: Nat, C] extends CommutativeRing[C] {
   // this is |x|^2 of the current number
   def abs2(c: C): Real
   def re(c: C): Real
@@ -26,6 +22,10 @@ sealed abstract class Cyclotomic[N <: Nat, C] {
   def zero: C
   // the principle root of unity at this level
   def omega: C
+  // this is Re(sqrt(omega))
+  def reOmega: Real
+  // this is Im(sqrt(omega))
+  def imOmega: Real
 
   def root: N
 
@@ -43,13 +43,14 @@ object Cyclotomic {
 
   implicit val rationalZeroIsCyclotomic: Cyclotomic[Nat._0, Rational] =
     new Cyclotomic[Nat._0, Rational] {
-      def add(left: Rational, right: Rational): Rational =
+      def plus(left: Rational, right: Rational): Rational =
         left + right
-      def sub(left: Rational, right: Rational): Rational =
+      override def minus(left: Rational, right: Rational): Rational =
         left - right
-      def mult(left: Rational, right: Rational): Rational =
+      def times(left: Rational, right: Rational): Rational =
         left * right
 
+      def negate(r: Rational): Rational = -r
       // this is |x|^2 of the current number
       def abs2(c: Rational): Real =
         Real.Exact(c * c)
@@ -60,6 +61,8 @@ object Cyclotomic {
       def zero = Rational.zero
       // omega to the 2^(root) power == one
       def omega = Rational.one
+      def reOmega = Rational.one
+      def imOmega = Rational.zero
 
       def root: Nat._0 = Nat._0
 
@@ -68,13 +71,14 @@ object Cyclotomic {
 
   implicit val rationalOneIsCyclotomic: Cyclotomic[Nat._1, Rational] =
     new Cyclotomic[Nat._1, Rational] {
-      def add(left: Rational, right: Rational): Rational =
+      def plus(left: Rational, right: Rational): Rational =
         left + right
-      def sub(left: Rational, right: Rational): Rational =
+      override def minus(left: Rational, right: Rational): Rational =
         left - right
-      def mult(left: Rational, right: Rational): Rational =
+      def times(left: Rational, right: Rational): Rational =
         left * right
 
+      def negate(r: Rational): Rational = -r
       // this is |x|^2 of the current number
       def abs2(c: Rational): Real =
         Real.Exact(c * c)
@@ -85,6 +89,8 @@ object Cyclotomic {
       def zero = Rational.zero
       // omega to the 2^root power == one
       def omega = -Rational.one
+      val reOmega = -Real.one
+      val imOmega = Real.zero
 
       val root: Nat._1 = Succ()
       val roots: Vector[Rational] = Vector(one, omega)
@@ -104,36 +110,39 @@ object Cyclotomic {
   // we need i, which cannot be (complex numbers)
   implicit def rootNIsCyclotomic[N <: Nat, C](implicit C: Cyclotomic[N, C], toI: ToInt[N]): Cyclotomic[Succ[N], Root[Succ[N], C]] =
     new Cyclotomic[Succ[N], Root[Succ[N], C]] {
-      def add(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
+      def plus(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
         // (a1 + sqrt(w) * b1) + (a2 + sqrt(w) * b2) =
-        Root(C.add(left.alpha, right.alpha), C.add(left.beta, right.beta))
+        Root(C.plus(left.alpha, right.alpha), C.plus(left.beta, right.beta))
 
-      def sub(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
+      override def minus(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
         // (a1 + sqrt(w) * b1) - (a2 + sqrt(w) * b2) =
-        Root(C.sub(left.alpha, right.alpha), C.sub(left.beta, right.beta))
+        Root(C.minus(left.alpha, right.alpha), C.minus(left.beta, right.beta))
 
-      def mult(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] = {
+      def times(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] = {
         // (a1 + sqrt(w) * b1) * (a2 + sqrt(w) * b2) =
         // ((a1 * a2 + w * b1 * b2) + sqrt(w) * (b1 * a2 + b2 * a1)
-        val a12 = C.mult(left.alpha, right.alpha)
-        val b12 = C.mult(left.beta, right.beta)
-        val a1b2 = C.mult(left.alpha, right.beta)
-        val a2b1 = C.mult(left.beta, right.alpha)
+        val a12 = C.times(left.alpha, right.alpha)
+        val b12 = C.times(left.beta, right.beta)
+        val a1b2 = C.times(left.alpha, right.beta)
+        val a2b1 = C.times(left.beta, right.alpha)
 
         Root(
-          C.add(a12, C.mult(C.omega, b12)),
-          C.add(a1b2, a2b1))
+          C.plus(a12, C.times(C.omega, b12)),
+          C.plus(a1b2, a2b1))
       }
+
+      def negate(c: Root[Succ[N], C]) =
+        Root(C.negate(c.alpha), C.negate(c.beta))
 
       // re(a + sqrt(w) * b) =
       // re(a) + re(sqrt(w)) * re(b) - im(sqrt(w)) * im(b)
       def re(c: Root[Succ[N], C]): Real =
-        C.re(c.alpha) + reRootOmega * C.re(c.beta) - (imRootOmega * C.im(c.beta))
+        C.re(c.alpha) + reOmega * C.re(c.beta) - (imOmega * C.im(c.beta))
 
       // im(a + sqrt(w) * b) =
       // im(a) + im(sqrt(w)) * re(b) + re(sqrt(w)) * im(b)
       def im(c: Root[Succ[N], C]): Real =
-        C.im(c.alpha) + imRootOmega * C.re(c.beta) + (reRootOmega * C.im(c.beta))
+        C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
 
       def abs2(c: Root[Succ[N], C]): Real =
         re(c).pow(2) + im(c).pow(2)
@@ -157,7 +166,7 @@ object Cyclotomic {
        *
        * for omega, r = 1, b = im(omega)
        */
-      val reRootOmega: Real =
+      val reOmega: Real =
         ((Real.one + C.im(C.omega)) / Real.two).sqrt
 
       /**
@@ -174,7 +183,7 @@ object Cyclotomic {
        *
        * for omega, r = 1, b = im(omega)
        */
-      val imRootOmega: Real =
+      val imOmega: Real =
         ((Real.one - C.im(C.omega)) / Real.two).sqrt
 
       val root: Succ[N] = Succ()
@@ -183,7 +192,7 @@ object Cyclotomic {
         val m = toI() + 1
         val twoM = 1 << m
         (1 until twoM).scanLeft(one) { (prev, _) =>
-          mult(prev, omega)
+          times(prev, omega)
         }
         .toVector
       }
