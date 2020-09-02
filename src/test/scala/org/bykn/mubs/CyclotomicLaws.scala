@@ -107,18 +107,20 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
     }
   }
 
+  test(s"C$depth omega = cos(2 pi / n) + i sin(2 pi / n)") {
+    val theta = Real.pi * 2 / twoM
+    assert(cyclotomic.reOmega == Real.cos(theta))
+    assert(cyclotomic.imOmega == Real.sin(theta))
+  }
+
   test(s"C$depth omega ^ (2^m) == 1") {
 
-    def pow(c: C, n: Int): C =
-      if (n <= 0) c
-      else pow(cyclotomic.times(cyclotomic.omega, c), n - 1)
-
-    val shouldBeOne = pow(cyclotomic.one, twoM)
+    val shouldBeOne = cyclotomic.pow(cyclotomic.omega, twoM)
     assert(shouldBeOne == cyclotomic.one)
 
     if (twoM > 1) {
-      val shouldBeNOne = pow(cyclotomic.one, twoM / 2)
-      assert(shouldBeNOne == cyclotomic.minus(cyclotomic.zero, cyclotomic.one))
+      val shouldBeNOne = cyclotomic.pow(cyclotomic.omega, twoM / 2)
+      assert(shouldBeNOne == cyclotomic.negate(cyclotomic.one))
     }
   }
 

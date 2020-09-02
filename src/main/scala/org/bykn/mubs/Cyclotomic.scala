@@ -59,6 +59,7 @@ object Cyclotomic {
       def one = Rational.one
       def zero = Rational.zero
       // omega to the 2^(root) power == one
+      // omega to the (2^root - 1) power != one
       def omega = Rational.one
       def reOmega = Rational.one
       def imOmega = Rational.zero
@@ -217,38 +218,14 @@ object Cyclotomic {
       val omega: Root[Succ[N], C] = Root(C.zero, C.one)
 
       /**
-       * a + ib = r e (i theta)
-       * r = sqrt(a^2 + b^2)
-       * cos(theta) = b/r
-       * sin(theta) = a/r
-       *
-       * Re(\sqrt{a+ib})
-       *   = Re(sqrt(r) e(i theta/2))
-       *   = sqrt(r) cos(theta/2)
-       *   = sqrt(r) sqrt((1 + cos(theta))/2)
-       *   = sqrt((r + b) / 2)
-       *
-       * for omega, r = 1, b = im(omega)
+       * cos(theta) = cos(C.theta/2) = sqrt((1 + cos(C.theta))/2)
        */
-      val reOmega: Real =
-        ((Real.one + C.imOmega) / Real.two).sqrt
+      val reOmega: Real = ((Real.one + C.reOmega) / Real.two).sqrt
 
       /**
-       * a + ib = r e (i theta)
-       * r = sqrt(a^2 + b^2)
-       * cos(theta) = b/r
-       * sin(theta) = a/r
-       *
-       * Im(\sqrt{a+ib})
-       *   = Im(sqrt(r) e(i theta/2))
-       *   = sqrt(r) sin(theta/2)
-       *   = sqrt(r) sqrt((1 - cos(theta))/2)
-       *   = sqrt((r - b) / 2)
-       *
-       * for omega, r = 1, b = im(omega)
+       * sin(theta) = sin(C.theta/2) = sqrt((1 - cos(C.theta))/2)
        */
-      val imOmega: Real =
-        ((Real.one - C.imOmega) / Real.two).sqrt
+      val imOmega: Real = ((Real.one - C.reOmega) / Real.two).sqrt
 
       val root: Succ[N] = Succ()
 
