@@ -8,7 +8,7 @@ import org.scalacheck.Prop.forAll
 
 abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C], nToInt: nat.ToInt[N]) extends munit.ScalaCheckSuite {
 
-  def depth: String = nToInt().toString
+  def depth: String = nToInt().toString + " " + getClass.getName
 
   val twoM: Int = 1 << nToInt()
 
@@ -90,6 +90,14 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
     }
   }
 
+  property(s"C$depth abs2(c) == re(c)^2 + im(c)^2") {
+    forAll { (c: C) =>
+      val left = cyclotomic.abs2(c)
+      val right = cyclotomic.re(c).pow(2) + cyclotomic.im(c).pow(2)
+      left == right
+    }
+  }
+
   property(s"C$depth triangle inequality") {
     forAll { (a: C, b: C) =>
       val plus = cyclotomic.plus(a, b)
@@ -139,3 +147,9 @@ class CyclotomicLaws2 extends CyclotomicLaws[Cyclotomic.N2, Cyclotomic.C2]
 class CyclotomicLaws3 extends CyclotomicLaws[Cyclotomic.N3, Cyclotomic.C3]
 class CyclotomicLaws4 extends CyclotomicLaws[Cyclotomic.N4, Cyclotomic.C4]
 class CyclotomicLaws5 extends CyclotomicLaws[Cyclotomic.N5, Cyclotomic.C5]
+
+class CyclotomicLawsL1 extends CyclotomicLaws[Cyclotomic.N1, Cyclotomic.L1]
+class CyclotomicLawsL2 extends CyclotomicLaws[Cyclotomic.N2, Cyclotomic.L2]
+class CyclotomicLawsL3 extends CyclotomicLaws[Cyclotomic.N3, Cyclotomic.L3]
+class CyclotomicLawsL4 extends CyclotomicLaws[Cyclotomic.N4, Cyclotomic.L4]
+class CyclotomicLawsL5 extends CyclotomicLaws[Cyclotomic.N5, Cyclotomic.L5]
