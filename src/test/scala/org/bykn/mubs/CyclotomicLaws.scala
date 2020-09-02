@@ -1,5 +1,6 @@
 package org.bykn.mubs
 
+import spire.math.Real
 import shapeless.ops.nat
 import shapeless.Nat
 import org.scalacheck.{Arbitrary, Gen}
@@ -89,6 +90,15 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
     }
   }
 
+  property(s"C$depth triangle inequality") {
+    forAll { (a: C, b: C) =>
+      val add = cyclotomic.add(a, b)
+      val abs = cyclotomic.abs2(add).sqrt
+
+      assert(abs.compare(cyclotomic.abs2(a).sqrt + cyclotomic.abs2(b).sqrt) <= 0)
+    }
+  }
+
   test(s"C$depth omega ^ (2^m) == 1") {
 
     def pow(c: C, n: Int): C =
@@ -103,6 +113,18 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
       assert(shouldBeNOne == cyclotomic.sub(cyclotomic.zero, cyclotomic.one))
     }
   }
+
+  if (twoM > 1) {
+    test(s"C$depth sum of all roots is 0") {
+      val left = cyclotomic.roots.reduce(cyclotomic.add(_, _))
+      assert(left == cyclotomic.zero, cyclotomic.toComplex(left).toString)
+    }
+  }
+
+  test(s"C$depth abs2(omega) == 1") {
+    val one = cyclotomic.abs2(cyclotomic.omega)
+    assert(one == Real.one, one.toString)
+  }
 }
 
 class CyclotomicLaws0 extends CyclotomicLaws[Cyclotomic.N0, Cyclotomic.C0]
@@ -110,3 +132,4 @@ class CyclotomicLaws1 extends CyclotomicLaws[Cyclotomic.N1, Cyclotomic.C1]
 class CyclotomicLaws2 extends CyclotomicLaws[Cyclotomic.N2, Cyclotomic.C2]
 class CyclotomicLaws3 extends CyclotomicLaws[Cyclotomic.N3, Cyclotomic.C3]
 class CyclotomicLaws4 extends CyclotomicLaws[Cyclotomic.N4, Cyclotomic.C4]
+class CyclotomicLaws5 extends CyclotomicLaws[Cyclotomic.N5, Cyclotomic.C5]

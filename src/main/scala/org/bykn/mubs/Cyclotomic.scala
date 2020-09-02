@@ -2,6 +2,7 @@ package org.bykn.mubs
 
 import algebra.ring.CommutativeRig
 import shapeless.{Nat, Succ}
+import shapeless.ops.nat.ToInt
 import spire.math.{Complex, Natural, Real, Rational}
 
 /**
@@ -27,6 +28,10 @@ sealed abstract class Cyclotomic[N <: Nat, C] {
   def omega: C
 
   def root: N
+
+  // a vector of length 2^N
+  // starting with 1, omega, omega^2, ...
+  def roots: Vector[C]
 
   def toComplex(c: C): Complex[Real] =
     Complex(re(c), im(c))
@@ -57,6 +62,8 @@ object Cyclotomic {
       def omega = Rational.one
 
       def root: Nat._0 = Nat._0
+
+      val roots: Vector[Rational] = Vector(one)
     }
 
   implicit val rationalOneIsCyclotomic: Cyclotomic[Nat._1, Rational] =
@@ -80,6 +87,7 @@ object Cyclotomic {
       def omega = -Rational.one
 
       val root: Nat._1 = Succ()
+      val roots: Vector[Rational] = Vector(one, omega)
     }
 
 
@@ -94,7 +102,7 @@ object Cyclotomic {
   // there are roots 2 and higher
   // can be represented with rationals alone. the second root,
   // we need i, which cannot be (complex numbers)
-  implicit def rootNIsCyclotomic[N <: Nat, C](implicit C: Cyclotomic[N, C]): Cyclotomic[Succ[N], Root[Succ[N], C]] =
+  implicit def rootNIsCyclotomic[N <: Nat, C](implicit C: Cyclotomic[N, C], toI: ToInt[N]): Cyclotomic[Succ[N], Root[Succ[N], C]] =
     new Cyclotomic[Succ[N], Root[Succ[N], C]] {
       def add(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
         // (a1 + sqrt(w) * b1) + (a2 + sqrt(w) * b2) =
@@ -135,17 +143,51 @@ object Cyclotomic {
       // omega to the 2^root power == one
       val omega: Root[Succ[N], C] = Root(C.zero, C.one)
 
-      // Re(\sqrt{a+ib}) = \sqrt{(r+a)/2}
-      // for omega, r = 1
+      /**
+       * a + ib = r e (i theta)
+       * r = sqrt(a^2 + b^2)
+       * cos(theta) = b/r
+       * sin(theta) = a/r
+       *
+       * Re(\sqrt{a+ib})
+       *   = Re(sqrt(r) e(i theta/2))
+       *   = sqrt(r) cos(theta/2)
+       *   = sqrt(r) sqrt((1 + cos(theta))/2)
+       *   = sqrt((r + b) / 2)
+       *
+       * for omega, r = 1, b = im(omega)
+       */
       val reRootOmega: Real =
-        ((Real.one + C.re(C.omega)) / Real.two).sqrt
+        ((Real.one + C.im(C.omega)) / Real.two).sqrt
 
-      // Im(\sqrt{a+ib}) = b/\sqrt{2(r+a)}
-      // for omega, r = 1
+      /**
+       * a + ib = r e (i theta)
+       * r = sqrt(a^2 + b^2)
+       * cos(theta) = b/r
+       * sin(theta) = a/r
+       *
+       * Im(\sqrt{a+ib})
+       *   = Im(sqrt(r) e(i theta/2))
+       *   = sqrt(r) sin(theta/2)
+       *   = sqrt(r) sqrt((1 - cos(theta))/2)
+       *   = sqrt((r - b) / 2)
+       *
+       * for omega, r = 1, b = im(omega)
+       */
       val imRootOmega: Real =
-        C.im(C.omega) / ((Real.two * (Real.one + C.re(C.omega))).sqrt)
+        ((Real.one - C.im(C.omega)) / Real.two).sqrt
 
       val root: Succ[N] = Succ()
+
+      val roots: Vector[Root[Succ[N], C]] = {
+        val m = toI() + 1
+        val twoM = 1 << m
+        (1 until twoM).scanLeft(one) { (prev, _) =>
+          mult(prev, omega)
+        }
+        .toVector
+      }
+
     }
 
   // 1 = 1st roots
