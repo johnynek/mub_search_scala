@@ -1,7 +1,9 @@
 package org.bykn.mubs
 
+import cats.Eval
 import com.monovore.decline.CommandApp
 import java.util.concurrent.Executors
+import java.util.BitSet
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
@@ -17,6 +19,27 @@ import spire.math.{SafeLong, Real}
  * we are approximately unbiased
  *
  * if ||<a, b>|^2 - d| <= 4d sin^2(pi / n)
+ *
+ * TODO: we can standardize an MUB
+ *
+ * by Zi H_i W_i
+ * such that the first row and column
+ * are 1, further, we can set Z_0 = I, W_0 = I
+ * next we can sort the columns so smaller
+ * values appear first
+ *
+ * Using this equivalence, we can cut
+ * the search space by a factor since
+ * we can find all standardized bases H_i
+ * and then multiply by all possible
+ * left and right shifts.
+ *
+ * lastly, multiplying on the right doesn't
+ * change unbiased-ness or orthogonality
+ * we can by convention set to I
+ *
+ * finally, since overall phase doesn't matter
+ * we can set the first element of Z_i to 1
  */
 object VectorSpace {
 
@@ -125,6 +148,22 @@ object VectorSpace {
       }
     }
 
+    val conjProdInt: () => (Int, Int) => Int = {
+      // TODO this could be optimized to not use an intermediate vector
+      () => {
+        val v1 = zeroVec()
+        val v2 = zeroVec()
+        val target = zeroVec()
+
+        (i1: Int, i2: Int) => {
+          intToVector(i1, v1)
+          intToVector(i2, v2)
+          conjProd(v1, v2, target)
+          vectorToInt(target)
+        }
+      }
+    }
+
     // we do the conjugate on the left
     def dotAbs(v1: Array[Int], v2: Array[Int]): Real = {
       require(v1.length == v2.length)
@@ -229,103 +268,223 @@ object VectorSpace {
       count
     }
 
-    private def buildCachedFn(fn: Real => Boolean): () => Int => Int => Boolean = {
+    private[this] val vectorRange = (0 until vectorCount.toInt)
+
+    private def buildCache(fn: Real => Boolean): BitSet = {
       // first we compute all the traces that are orthogonal
       val tmp = new Array[Int](dim)
       // the java bitset doesn't box on access
-      val bitset = new java.util.BitSet(vectorCount.toInt)
-      (0 until vectorCount.toInt)
+      val bitset = new BitSet(vectorCount.toInt)
+      vectorRange
         .foreach { v =>
           intToVector(v, tmp)
           if (fn(trace(tmp))) bitset.set(v)
         }
 
-      // now we have the whole bitset,
-
-      () => {
-        val v1 = new Array[Int](dim)
-        val v2 = new Array[Int](dim)
-        val v3 = new Array[Int](dim)
-
-        { n1: Int =>
-          intToVector(n1, v1)
-
-          { n2: Int =>
-            intToVector(n2, v2)
-            conjProd(v1, v2, v3)
-            val n3 = vectorToInt(v3)
-            bitset.get(n3)
-          }
-        }
-      }
+      bitset
     }
 
-    // there are all orthogonal basis
-    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val vci = vectorCount.toInt
+    // this builds standardized bases:
+    // to be orthogonal: you must also be orthogonal to 0
+    // to be unbiased, you must be unbiased to 0
+    //
+    // return the first index in the set
+    private def buildCachedFn(bitset: BitSet): (Int, () => Int => Int => Boolean) = {
+      // first we compute all the traces that are orthogonal
 
+      // there should be at least one
+      val first = vectorRange.iterator.filter(bitset.get(_)).next()
+      // now we have the whole bitset,
+
+      val cp = conjProdInt
+
+      val res = () => {
+        val intCP = cp()
+
+        { n1: Int =>
+          if (bitset.get(n1)) {
+
+            { n2: Int =>
+
+              (bitset.get(n2)) && {
+                val n3 = intCP(n1, n2)
+                bitset.get(n3)
+              }
+            }
+          }
+          else Function.const(false)(_: Int)
+        }
+      }
+
+      (first, res)
+    }
+
+    /**
+     * These are all standardized Hadamards:
+     * they have 0 in the last position (1)
+     * and they all include the all 0 vector (which is omitted
+     * in the response)
+     */
+    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
+      val vci = vectorCount.toInt / rootArray.length
+
+      val (first, fn) = buildCachedFn(buildCache(isOrth))
       // we use an array for the ints because it is more space efficient
       // than lists
       Cliques.findAllFuture[Int,Array[Int]](
-        size = dim, // the number of items in a basis is the dimension
-        initNode = 0,
+        size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
+        initNode = first,
         incNode = { i: Int => i + 1},
         isLastNode = { i: Int => vci <= i },
-        buildCachedFn(isOrth),
+        fn,
         { lst => lst.toArray })
     }
 
     def allBases(): List[Array[Int]] =
       Await.result(allBasesFuture()(ExecutionContext.global), Inf)
 
-    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[List[List[Array[Int]]]] = {
-      // we use the head of this list as the node
-      type Node = List[Array[Int]]
-      def nodeToList(n: Node): Array[Int] = n.head
+    /**
+     * These are sets of mutually unbiased vectors.
+     * This is an upper bound on unbiased bases because
+     * selecting a single item from unbiased bases is a
+     * set of unbiased vectors
+     *
+     * These are *standardized*: they are all unbiased to 0
+     * and all have 0 in the final position
+     */
+    private def allMubVectorsFutureWithFn(cliqueSize: Int)(implicit ec: ExecutionContext): (BitSet, Future[List[Array[Int]]]) = {
+      val vci = vectorCount.toInt / rootArray.length
 
-      def incNode(n: Node): Node = n.tail
-      def isLastNode(n: Node): Boolean = n.lengthCompare(1) == 0
+      val ubBitSet = buildCache(isUnbiased)
+      val (first, fn) = buildCachedFn(ubBitSet)
+      // we use an array for the ints because it is more space efficient
+      // than lists
+      (ubBitSet, Cliques.findAllFuture[Int,Array[Int]](
+        size = (cliqueSize - 1), // the number of items in a basis is the dimension
+        initNode = first,
+        incNode = { i: Int => i + 1},
+        isLastNode = { i: Int => vci <= i },
+        fn,
+        { lst => lst.toArray }))
+    }
 
-      val ubFn = buildCachedFn(isUnbiased)
+    /**
+     * These are sets of mutually unbiased vectors.
+     * This is an upper bound on unbiased bases because
+     * selecting a single item from unbiased bases is a
+     * set of unbiased vectors
+     *
+     * These are *standardized*: they are all unbiased to 0
+     * and all have 0 in the final position
+     */
+    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
+      val (_, fut) = allMubVectorsFutureWithFn(cliqueSize)
+      fut
+    }
 
-      val buildBasisFn = () => {
-        val pairFn = ubFn()
+    def allMubVectors(cliqueSize: Int): List[Array[Int]] =
+      Await.result(allMubVectorsFuture(cliqueSize)(ExecutionContext.global), Inf)
 
-        // two heads are unbiased, if they are pairwise unbiased
-        { n1: Node =>
-          val list1 = nodeToList(n1)
-
-          { n2: Node =>
-            val list2 = nodeToList(n2)
-
-            list1
-              .forall { l1 =>
-                val fn1 = pairFn(l1)
-                list2.forall(fn1)
+    // transform all but the first with a the corresponding mub
+    // we add back the 0 vector to the front in the results
+    private def transformStdBasis(hs: List[Array[Int]], mub: Array[Int], ubBitSet: BitSet): Option[List[Array[Int]]] =
+      hs match {
+        case Nil => None
+        case h :: rest =>
+          val cp = conjProdInt()
+          // we use conjugate product to transform, but we could also not use conjugate (since
+          // conjugate of H is another H
+          require(rest.size == mub.length)
+          val restz: List[Array[Int]] =
+            mub.toList.zip(rest)
+              .map { case (z, had) =>
+                (cp(z, 0) :: had.toList.map(cp(z, _))).toArray
               }
-          }
-        }
+
+          val h1 = 0 +: h
+
+          val allBases = h1 :: restz
+
+          val isUB =
+            allDistinctPairs(allBases)
+              .forall { case (h1, h2) =>
+                h1
+                  .forall { v1 =>
+                    h2.forall { v2 =>
+                      ubBitSet.get(cp(v1, v2))
+                    }
+                  }
+              }
+
+          if (isUB) Some(allBases)
+          else None
       }
 
-      allBasesFuture()
-        .flatMap { nodes =>
-          Cliques.findAllFuture[Node, List[Node]](
-            size = cnt, // the number of items in a basis is the dimension
-            initNode = nodes,
-            incNode = incNode,
-            isLastNode = isLastNode,
-            buildBasisFn,
-            identity)
-        }
-        .map { cliques =>
-          cliques.map { members =>
-            members.map(nodeToList)
+    /**
+     * Generate all standard bases, then all sets of unbiased standard vectors.
+     * Finally, try to assemble a set of MUBs from these:
+     * H0, Z1 H1, Z2 H2, ...
+     */
+    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[List[List[Array[Int]]]] = {
+
+      val (ubBitSet, mubs) = allMubVectorsFutureWithFn(cnt)
+      // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
+      // to transform them. We have to include the phantom 0 vector
+      def assemble(bases: List[Array[Int]], mubV: List[Array[Int]]): Future[List[List[Array[Int]]]] = {
+        require(bases.forall(_.size == dim - 1), "invalid basis size")
+        require(mubV.forall(_.size == (cnt - 1)), "invalid mub size")
+        // these are all sets of cnt bases
+        // in every possible order
+        val allHs: List[List[Array[Int]]] =
+          chooseN(cnt, bases)
+
+        Future.traverse(mubV) { ubv =>
+          Future {
+            allHs.flatMap { hs =>
+              transformStdBasis(hs, ubv, ubBitSet).toList
+            }
           }
         }
+        .map(_.flatten)
+      }
+
+      allBasesFuture().zip(mubs)
+        .flatMap { case (bases, mubV) => assemble(bases, mubV) }
     }
 
     def allMubs(cnt: Int): List[List[Array[Int]]] =
       Await.result(allMubsFuture(cnt)(ExecutionContext.global), Inf)
+  }
+
+  // return lists of exactly n items where each item
+  // comes from an index in items.
+  // we do allow repeats, so we choose with replacement
+  def chooseN[A](n: Int, items: List[A]): List[List[A]] = {
+
+    def loop(n: Int): List[List[A]] =
+      if (n <= 0) Nil :: Nil
+      else {
+        // we could pick any first item
+        // followed by picking n-1 from any items
+        items.flatMap { h =>
+          loop(n - 1).map(h :: _)
+        }
+      }
+
+    loop(n)
+  }
+
+  def allDistinctPairs[A](items: List[A]): List[(A, A)] = {
+    @annotation.tailrec
+    def loop(items: List[A], acc: List[(A, A)]): List[(A, A)] =
+      items match {
+        case Nil => acc.reverse
+        case h :: rest =>
+          val hpairs = rest.map((h, _))
+          loop(rest, hpairs reverse_::: acc)
+      }
+
+    loop(items, Nil)
   }
 }
 

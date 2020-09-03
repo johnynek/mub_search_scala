@@ -9,8 +9,11 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
   val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim, 20)
 
-  val genVec: Gen[Array[Int]] =
+  val genInt: Gen[Int] =
     Gen.choose(0, space.vectorCount.toInt - 1)
+
+  val genVec: Gen[Array[Int]] =
+    genInt
       .map { i =>
         val ary = new Array[Int](dim)
         space.intToVector(i, ary)
@@ -54,7 +57,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
   property("intToVector and vectorToInt roundTrip") {
     val ary = new Array[Int](dim)
-    forAll(Gen.choose(0, space.vectorCount.toInt - 1)) { i: Int =>
+    forAll(genInt) { i: Int =>
       space.intToVector(i, ary)
       val i1 = space.vectorToInt(ary)
       i1 == i
@@ -63,11 +66,49 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
   property("incInPlace is like adding 1") {
     val ary = new Array[Int](dim)
-    forAll(Gen.choose(0, space.vectorCount.toInt - 1)) { i: Int =>
+    forAll(genInt) { i: Int =>
       space.intToVector(i, ary)
       space.incInPlace(ary)
       val i1 = space.vectorToInt(ary)
       i1 == (i + 1)
+    }
+  }
+
+  property("conjProdInt works like conjProd") {
+    val v1 = new Array[Int](dim)
+    val v2 = new Array[Int](dim)
+    val v3 = new Array[Int](dim)
+    val cp = space.conjProdInt()
+    forAll(genInt, genInt) { (i1, i2) =>
+      space.intToVector(i1, v1)
+      space.intToVector(i2, v2)
+      space.conjProd(v1, v2, v3)
+      val i3 = space.vectorToInt(v3)
+      assert(cp(i1, i2) == i3)
+    }
+  }
+
+  property("chooseN(n, x) returns x.length^n items each with exactly n items and no duplicates") {
+    forAll(Gen.choose(0, 4), Gen.choose(0, 10).flatMap(Gen.listOfN(_, Gen.const(())))) { (n, x) =>
+      // zipWithIndex to make each item unique
+      val items = VectorSpace.chooseN(n, x.zipWithIndex)
+      assert(items.length == math.pow(x.length, n).toInt)
+      assert(items.forall(_.length == n))
+      assert(items.distinct == items)
+    }
+  }
+
+  property("allDistinctPairs returns n(n-1)/2 items") {
+    forAll(Gen.choose(0, 100).flatMap(Gen.listOfN(_, Gen.const(())))) { x =>
+      // zipWithIndex to make each item unique
+      val uniq = x.zipWithIndex
+      val items = VectorSpace.allDistinctPairs(uniq)
+      val n = x.length
+      assert(items.length == (n*(n-1)/2))
+      val allSet = items.toSet
+      assert(allSet.size == items.length)
+      // we don't contain x and x.swap
+      assert(items.forall { pair => !allSet(pair.swap) })
     }
   }
 }
