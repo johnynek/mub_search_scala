@@ -4,6 +4,8 @@ import scala.reflect.ClassTag
 import shapeless.{Nat}
 import shapeless.ops.nat.ToInt
 import spire.math.{SafeLong, Real}
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration.Duration.Inf
 
 /**
  * We say a pair of vectors, of dimension d
@@ -58,6 +60,18 @@ object VectorSpace {
       acc
     }
 
+    def intToVector(i: Int, into: Array[Int]): Unit = {
+      // consider this as a number base rootArray.length
+      var idx = 0
+      var value = i
+      val size = rootArray.length
+      while (idx < into.length) {
+        into(idx) = value % size
+        value = value / size
+        idx = idx + 1
+      }
+    }
+
     // if there is a vector after the current
     // one, inc to that and return true
     def incInPlace(v: Array[Int]): Boolean = {
@@ -80,12 +94,38 @@ object VectorSpace {
       false
     }
 
+    def trace(v: Array[Int]): Real = {
+      var idx = 0
+      var acc = C.zero
+      while (idx < v.length) {
+        val item = rootArray(v(idx))
+        acc = C.plus(acc, item)
+        idx = idx + 1
+      }
+      C.abs2(acc)
+    }
+
+    def conjProd(v1: Array[Int], v2: Array[Int], target: Array[Int]): Unit = {
+      require(v1.length == v2.length)
+      require(v1.length == target.length)
+
+      var idx = 0
+      while (idx < v1.length) {
+        val left = rootArray.length - v1(idx)
+        val right = v2(idx)
+        target(idx) = (left + right) % rootArray.length
+        idx = idx + 1
+      }
+    }
+
+    // we do the conjugate on the left
     def dotAbs(v1: Array[Int], v2: Array[Int]): Real = {
       require(v1.length == v2.length)
       var idx = 0
       var acc = C.zero
       while (idx < v1.length) {
-        val left = rootArray(v1(idx))
+        val v1idx = v1(idx)
+        val left = rootArray(if (v1idx == 0) 0 else (rootArray.length - v1idx))
         val right = rootArray(v2(idx))
         acc = C.plus(acc, C.times(left, right))
         idx = idx + 1
@@ -94,23 +134,28 @@ object VectorSpace {
       C.abs2(acc)
     }
 
-    def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean = {
+    def isOrth(r: Real): Boolean = {
+      val diff = r - eps
+
+      // this is the closest rational x such that r = x/2^p
+      diff(realBits).signum <= 0
+    }
+
+    def isUnbiased(r: Real): Boolean = {
+      val diff = (r - realD).abs - eps
+      // this is the closest rational x such that r = x/2^p
+      diff(realBits).signum <= 0
+    }
+
+    def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // acc <= 4d sin^2(pi / n)
-      val diff = dotAbs(v1, v2) - eps
+      isOrth(dotAbs(v1, v2))
 
-      // this is the closest rational x such that r = x/2^p
-      diff(realBits).signum <= 0
-    }
-
-    def maybeUnbiased(v1: Array[Int], v2: Array[Int]): Boolean = {
+    def maybeUnbiased(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // |acc - d| <= 4d sin^2(pi / n)
-      val diff = (dotAbs(v1, v2) - realD).abs - eps
-
-      // this is the closest rational x such that r = x/2^p
-      diff(realBits).signum <= 0
-    }
+      isUnbiased(dotAbs(v1, v2))
 
     // we represent each hadamard as a set of indices into the roots
     def isApproximatelyOrthogonal(vectors: List[Array[Int]]): Boolean = {
@@ -176,5 +221,98 @@ object VectorSpace {
 
       count
     }
+
+    private def buildCachedFn(fn: Real => Boolean): () => Int => Int => Boolean = {
+      // first we compute all the traces that are orthogonal
+      val tmp = new Array[Int](dim)
+      val bitset = new scala.collection.mutable.BitSet(vectorCount.toInt)
+      (0 until vectorCount.toInt)
+        .foreach { v =>
+          intToVector(v, tmp)
+          if (fn(trace(tmp))) bitset.addOne(v)
+        }
+
+      // now we have the whole bitset,
+
+      () => {
+        val v1 = new Array[Int](dim)
+        val v2 = new Array[Int](dim)
+        val v3 = new Array[Int](dim)
+
+        { n1: Int =>
+          intToVector(n1, v1)
+
+          { n2: Int =>
+            intToVector(n2, v2)
+            conjProd(v1, v2, v3)
+            val n3 = vectorToInt(v3)
+            bitset(n3)
+          }
+        }
+      }
+    }
+
+    // there are all orthogonal basis
+    def allBasesFuture()(implicit ec: ExecutionContext): Future[LazyList[List[Int]]] = {
+      val vci = vectorCount.toInt
+
+      Cliques.findAllFuture[Int](
+        size = dim, // the number of items in a basis is the dimension
+        initNode = 0,
+        incNode = { i: Int => i + 1},
+        isLastNode = { i: Int => vci <= i },
+        buildCachedFn(isOrth))
+    }
+
+    def allBases(): LazyList[List[Int]] =
+      Await.result(allBasesFuture()(ExecutionContext.global), Inf)
+
+    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[LazyList[List[List[Int]]]] = {
+      // we use the head of this list as the node
+      type Node = LazyList[List[Int]]
+      def nodeToList(n: Node): List[Int] = n.head
+
+      def incNode(n: Node): Node = n.tail
+      def isLastNode(n: Node): Boolean = n.isEmpty
+
+      val ubFn = buildCachedFn(isUnbiased)
+
+      val buildBasisFn = () => {
+        val pairFn = ubFn()
+
+        // two heads are unbiased, if they are pairwise unbiased
+        { n1: Node =>
+          val list1 = nodeToList(n1).map(pairFn)
+
+          { n2: Node =>
+            val list2 = nodeToList(n2)
+
+            list1
+              .iterator
+              .forall { fn1 =>
+                list2.forall(fn1)
+              }
+          }
+        }
+      }
+
+      allBasesFuture()
+        .flatMap { nodes =>
+          Cliques.findAllFuture[Node](
+          size = cnt, // the number of items in a basis is the dimension
+          initNode = nodes,
+          incNode = incNode,
+          isLastNode = isLastNode,
+          buildBasisFn)
+        }
+        .map { cliques =>
+          cliques.map { members =>
+            members.map(nodeToList)
+          }
+        }
+    }
+
+    def allMubs(cnt: Int): LazyList[List[List[Int]]] =
+      Await.result(allMubsFuture(cnt)(ExecutionContext.global), Inf)
   }
 }

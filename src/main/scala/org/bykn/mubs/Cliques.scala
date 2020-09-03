@@ -7,10 +7,22 @@ object Cliques {
   final def andN[@specialized(Int) A](n0: A => Boolean, n1: A => Boolean): A => Boolean =
     { n: A => n0(n) && n1(n) }
 
+  private def findCheat[@specialized(Int) A](
+    size: Int,
+    initNode: A,
+    incNode: A => A,
+    isLastNode: A => Boolean,
+    inClique: A => Boolean,
+    nfn: A => A => Boolean,
+    searchNext: Boolean,
+    acc: List[List[A]]): List[List[A]] =
+      find(size, initNode, incNode, isLastNode, inClique, nfn, searchNext, acc)
+
   /**
    * Final all cliques starting with initNode
    * that have a given size
    */
+  @annotation.tailrec
   private def find[@specialized(Int) A](
     size: Int,
     initNode: A,
@@ -18,30 +30,26 @@ object Cliques {
     isLastNode: A => Boolean,
     inClique: A => Boolean,
     nfn: A => A => Boolean,
-    searchNext: Boolean): LazyList[List[A]] = {
+    searchNext: Boolean,
+    acc: List[List[A]]): List[List[A]] =
 
-    def fromNext: LazyList[List[A]] =
-      if (searchNext) find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true)
-      else LazyList.empty[List[A]]
-
-    if (size <= 0) LazyList(Nil)
+    if (size <= 0) (Nil :: acc).reverse
     else if (size == 1) {
-      def tail: LazyList[List[A]] =
-        if (isLastNode(initNode)) LazyList.empty[List[A]]
-        else fromNext
+      val acc1 =
+        if (inClique(initNode)) {
+          val c1: List[A] = initNode :: Nil
+          (c1 :: acc)
+        }
+        else acc
 
-
-      if (inClique(initNode)) {
-        val c1: List[A] = initNode :: Nil
-        (c1 #:: tail)
-      }
-      else tail
+        if (isLastNode(initNode) || !searchNext) acc1.reverse
+        else find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true, acc1)
     }
     else {
       // size is 2 or more
       if (isLastNode(initNode)) {
         // we can't find 2
-        LazyList.empty
+        acc.reverse
       }
       else {
         val nextNode = incNode(initNode)
@@ -53,21 +61,24 @@ object Cliques {
         if (inClique(initNode)) {
           val inClique2: A => Boolean = andN(nfn(initNode), inClique)
 
-          val withInit = find(
+          val withInit = findCheat(
             size - 1,
             nextNode,
             incNode,
             isLastNode,
             inClique2,
             nfn,
-            true).map(initNode :: _)
+            true,
+            Nil).map(initNode :: _)
 
-          withInit #::: fromNext
+          val acc1 = withInit reverse_::: acc
+          if (searchNext) find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true, acc1)
+          else acc1.reverse
         }
-        else fromNext
+        else if (searchNext) find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true, acc)
+        else acc.reverse
       }
     }
-  }
 
   def allNodes[@specialized(Int) A](initNode: A, incNode: A => A, isLastNode: A => Boolean): LazyList[A] =
     LazyList
@@ -82,18 +93,21 @@ object Cliques {
 
   /**
    * In parallel try to find all cliques
+   * the neighbor function is built once for each
+   * thread, so there is no sharing. If you want
+   * to build a cache, it is safe
    */
   final def findAllFuture[@specialized(Int) A](
     size: Int,
     initNode: A,
     incNode: A => A,
     isLastNode: A => Boolean,
-    nfn: A => A => Boolean)(implicit ec: ExecutionContext): Future[LazyList[List[A]]] = {
+    buildNfn: () => A => A => Boolean)(implicit ec: ExecutionContext): Future[LazyList[List[A]]] = {
 
     Future.traverse(allNodes(initNode, incNode, isLastNode)) { n =>
       Future {
         // we want to force inside the future
-        find(size, n, incNode, isLastNode, Function.const(true), nfn, false).toList
+        find(size, n, incNode, isLastNode, Function.const(true), buildNfn(), false, Nil)
       }
     }
     .map(_.flatten)

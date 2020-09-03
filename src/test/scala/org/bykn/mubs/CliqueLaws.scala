@@ -46,7 +46,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     val nodes = Cliques.allNodes(0, next, last)
 
-    val cliqres = Cliques.findAllFuture(size, 0, next, last, { n1: Int => nfn(n1, _) })
+    val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) })
 
     val cliq = Await.result(cliqres.map(_.toList), Inf)
 
@@ -59,7 +59,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     val nodes = Cliques.allNodes(0, next, last)
 
-    val cliqres = Cliques.findAllFuture(size, 0, next, last, { n1: Int => nfn(n1, _) })
+    val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) })
     val naive = naiveCliques(size, nodes, nfn).toList
 
     val cliq = Await.result(cliqres.map(_.toList), Inf)
@@ -86,14 +86,14 @@ class CliqueLaws extends munit.ScalaCheckSuite {
   }
 
   property("for cliques of size 2 we match naive") {
-    forAll(matchLaw(2, 20)(_))
+    forAll(matchLaw(2, 10)(_))
   }
 
   property("for cliques of size 3 we match naive") {
-    forAll(matchLaw(3, 20)(_))
+    forAll(matchLaw(3, 10)(_))
   }
 
   property("for cliques of size 4 we match naive") {
-    forAll(matchLaw(4, 20)(_))
+    forAll(matchLaw(4, 10)(_))
   }
 }
