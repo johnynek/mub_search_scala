@@ -1,0 +1,3 @@
+#!/bin/sh
+
+java -jar target/scala-2.13/mub_search_scala-assembly-0.1.0-SNAPSHOT.jar "$@"
