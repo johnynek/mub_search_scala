@@ -1,11 +1,13 @@
 package org.bykn.mubs
 
-import scala.reflect.ClassTag
-import shapeless.{Nat}
-import shapeless.ops.nat.ToInt
-import spire.math.{SafeLong, Real}
-import scala.concurrent.{Await, ExecutionContext, Future}
+import com.monovore.decline.CommandApp
+import java.util.concurrent.Executors
 import scala.concurrent.duration.Duration.Inf
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.reflect.ClassTag
+import shapeless.ops.nat.ToInt
+import shapeless.{Nat}
+import spire.math.{SafeLong, Real}
 
 /**
  * We say a pair of vectors, of dimension d
@@ -19,7 +21,8 @@ import scala.concurrent.duration.Duration.Inf
 object VectorSpace {
 
   // realBits is how many real bits to compute
-  class Space[N <: Nat, C: ClassTag](dim: Int, realBits: Int)(implicit val C: Cyclotomic[N, C]) {
+  class Space[N <: Nat, C: ClassTag](val dim: Int, realBits: Int)(implicit val C: Cyclotomic[N, C]) {
+
     // the total possible set of hadamard vectors is
     // (2^N)^d
     // for (2^N = 8) and d = 6, this is 262144
@@ -28,6 +31,10 @@ object VectorSpace {
 
     // array lookup is faster
     private val rootArray: Array[C] = C.roots.toArray
+
+    override def toString: String = {
+      s"Space(dim = $dim, roots = ${rootArray.length} realBits = $realBits)"
+    }
 
     val vectorCount: SafeLong = SafeLong(rootArray.length).pow(dim)
 
@@ -225,11 +232,12 @@ object VectorSpace {
     private def buildCachedFn(fn: Real => Boolean): () => Int => Int => Boolean = {
       // first we compute all the traces that are orthogonal
       val tmp = new Array[Int](dim)
-      val bitset = new scala.collection.mutable.BitSet(vectorCount.toInt)
+      // the java bitset doesn't box on access
+      val bitset = new java.util.BitSet(vectorCount.toInt)
       (0 until vectorCount.toInt)
         .foreach { v =>
           intToVector(v, tmp)
-          if (fn(trace(tmp))) bitset.addOne(v)
+          if (fn(trace(tmp))) bitset.set(v)
         }
 
       // now we have the whole bitset,
@@ -246,34 +254,37 @@ object VectorSpace {
             intToVector(n2, v2)
             conjProd(v1, v2, v3)
             val n3 = vectorToInt(v3)
-            bitset(n3)
+            bitset.get(n3)
           }
         }
       }
     }
 
     // there are all orthogonal basis
-    def allBasesFuture()(implicit ec: ExecutionContext): Future[LazyList[List[Int]]] = {
+    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
       val vci = vectorCount.toInt
 
-      Cliques.findAllFuture[Int](
+      // we use an array for the ints because it is more space efficient
+      // than lists
+      Cliques.findAllFuture[Int,Array[Int]](
         size = dim, // the number of items in a basis is the dimension
         initNode = 0,
         incNode = { i: Int => i + 1},
         isLastNode = { i: Int => vci <= i },
-        buildCachedFn(isOrth))
+        buildCachedFn(isOrth),
+        { lst => lst.toArray })
     }
 
-    def allBases(): LazyList[List[Int]] =
+    def allBases(): List[Array[Int]] =
       Await.result(allBasesFuture()(ExecutionContext.global), Inf)
 
-    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[LazyList[List[List[Int]]]] = {
+    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[List[List[Array[Int]]]] = {
       // we use the head of this list as the node
-      type Node = LazyList[List[Int]]
-      def nodeToList(n: Node): List[Int] = n.head
+      type Node = List[Array[Int]]
+      def nodeToList(n: Node): Array[Int] = n.head
 
       def incNode(n: Node): Node = n.tail
-      def isLastNode(n: Node): Boolean = n.isEmpty
+      def isLastNode(n: Node): Boolean = n.lengthCompare(1) == 0
 
       val ubFn = buildCachedFn(isUnbiased)
 
@@ -282,14 +293,14 @@ object VectorSpace {
 
         // two heads are unbiased, if they are pairwise unbiased
         { n1: Node =>
-          val list1 = nodeToList(n1).map(pairFn)
+          val list1 = nodeToList(n1)
 
           { n2: Node =>
             val list2 = nodeToList(n2)
 
             list1
-              .iterator
-              .forall { fn1 =>
+              .forall { l1 =>
+                val fn1 = pairFn(l1)
                 list2.forall(fn1)
               }
           }
@@ -298,12 +309,13 @@ object VectorSpace {
 
       allBasesFuture()
         .flatMap { nodes =>
-          Cliques.findAllFuture[Node](
-          size = cnt, // the number of items in a basis is the dimension
-          initNode = nodes,
-          incNode = incNode,
-          isLastNode = isLastNode,
-          buildBasisFn)
+          Cliques.findAllFuture[Node, List[Node]](
+            size = cnt, // the number of items in a basis is the dimension
+            initNode = nodes,
+            incNode = incNode,
+            isLastNode = isLastNode,
+            buildBasisFn,
+            identity)
         }
         .map { cliques =>
           cliques.map { members =>
@@ -312,7 +324,81 @@ object VectorSpace {
         }
     }
 
-    def allMubs(cnt: Int): LazyList[List[List[Int]]] =
+    def allMubs(cnt: Int): List[List[Array[Int]]] =
       Await.result(allMubsFuture(cnt)(ExecutionContext.global), Inf)
   }
 }
+
+object SearchApp extends CommandApp(
+  name = "mub-search",
+  header = "search for approximate mutually unbiased bases",
+  main = {
+    import com.monovore.decline.Opts
+    import cats.data.Validated
+    import VectorSpace.Space
+
+    import cats.implicits._
+
+    val realBits = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)
+    val dim = Opts.option[Int]("dim", "the dimension we are working in, should be small!").mapValidated { d =>
+      if (d < 2) Validated.invalidNel(s"invalid dimension: $d, should be >= 2")
+      else Validated.valid(d)
+    }
+
+    val goalMubs = Opts.option[Int]("mubs", "the number of mutually unbiased bases we try to find")
+      .orNone
+
+    val threads = Opts.option[Int]("threads", "number of threads to use, default = number of processors")
+      .withDefault(Runtime.getRuntime().availableProcessors())
+
+    val depth = Opts.option[Int]("depth", "we use 2^depth roots of unity")
+      .mapValidated { d =>
+
+        if ((0 <= d) && (d <= 4)) Validated.valid {
+          d match {
+            case 0 => { (d: Int, bits: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d, bits) }
+            case 1 => { (d: Int, bits: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d, bits) }
+            case 2 => { (d: Int, bits: Int) => new Space[Cyclotomic.N2, Cyclotomic.L2](d, bits) }
+            case 3 => { (d: Int, bits: Int) => new Space[Cyclotomic.N3, Cyclotomic.L3](d, bits) }
+            case 4 => { (d: Int, bits: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d, bits) }
+          }
+        }
+        else Validated.invalidNel(s"invalid depth: $d")
+      }
+
+    realBits
+      .product(dim)
+      .product(depth)
+      .map { case ((b, d), fn) => fn(d, b) }
+      .product(goalMubs)
+      .product(threads)
+      .map { case ((space, mubsOpt), threads) =>
+        // dim is the most we can get
+        val mubs = mubsOpt.getOrElse(space.dim)
+
+        val eserv = Executors.newFixedThreadPool(threads)
+        implicit val ec = ExecutionContext.fromExecutorService(eserv)
+        println(s"# $space")
+        val mubsVector = Await.result(space.allMubsFuture(mubs), Inf)
+        println(s"# found: ${mubsVector.length}")
+        var idx = 0
+        val ary = new Array[Int](space.dim)
+
+        mubsVector.foreach { clique =>
+          def showBasis(v: List[Array[Int]]): String = {
+            def showInt(i: Int): String = {
+              space.intToVector(i, ary)
+              ary.mkString("[", ", ", "]")
+            }
+            v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
+          }
+
+          val cliqueStr = showBasis(clique)
+          println(s"$idx: $cliqueStr")
+          idx = idx + 1
+        }
+
+        eserv.shutdown()
+      }
+  }
+)

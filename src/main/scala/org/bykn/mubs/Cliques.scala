@@ -97,17 +97,19 @@ object Cliques {
    * thread, so there is no sharing. If you want
    * to build a cache, it is safe
    */
-  final def findAllFuture[@specialized(Int) A](
+  final def findAllFuture[@specialized(Int) A, C](
     size: Int,
     initNode: A,
     incNode: A => A,
     isLastNode: A => Boolean,
-    buildNfn: () => A => A => Boolean)(implicit ec: ExecutionContext): Future[LazyList[List[A]]] = {
+    buildNfn: () => A => A => Boolean,
+    repr: List[A] => C)(implicit ec: ExecutionContext): Future[List[C]] = {
 
-    Future.traverse(allNodes(initNode, incNode, isLastNode)) { n =>
+    Future.traverse(allNodes(initNode, incNode, isLastNode).toList) { n =>
       Future {
         // we want to force inside the future
         find(size, n, incNode, isLastNode, Function.const(true), buildNfn(), false, Nil)
+          .map(repr)
       }
     }
     .map(_.flatten)

@@ -9,8 +9,10 @@ lazy val root = (project in file("."))
   .settings(
     name := "mub_search_scala",
     libraryDependencies ++= Seq(
+      "com.monovore" %% "decline" % "1.3.0",
       "org.typelevel" %% "spire" % "0.17.0-RC1",
       "org.typelevel" %% "algebra" % "2.0.1",
+      "org.typelevel" %% "cats-core" % "2.1.1",
       "com.chuusai" %% "shapeless" % "2.3.3",
       "org.scalameta" %% "munit" % "0.7.12" % Test,
       "org.scalameta" %% "munit-scalacheck" % "0.7.12" % Test,
