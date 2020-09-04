@@ -134,40 +134,38 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   /**
    * Some tests with smaller spaces that we can afford to examine
    */
-  val space3 = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](3, 20)
-  val genInt2: Gen[Int] =
-    Gen.choose(0, space3.vectorCount.toInt - 1)
+  val space2 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](2, 20)
 
   test("allMubVectors are all unbiased to each other and 0") {
-    val ubBitSet = space3.buildCache(space3.isUnbiased)
-    val nextFn = space3.nextFn(ubBitSet)
+    val ubBitSet = space2.buildCache(space2.isUnbiased)
+    val nextFn = space2.nextFn(ubBitSet)
 
-    (0 until space3.vectorCount.toInt).foreach { v =>
+    (0 until space2.standardCount).foreach { v =>
       val v1 = nextFn(v)
 
-      assert(ubBitSet.get(v1) || (v1 >= space3.vectorCount.toInt), s"v = $v, v1 = $v1")
+      assert(ubBitSet.get(v1) || (v1 >= space2.standardCount), s"v = $v, v1 = $v1")
     }
 
     (1 to 3).foreach { mubSize =>
-      space3
+      space2
         .allMubVectors(mubSize)
         .foreach { mubSet =>
-          val z = space3.zeroVec()
-          val vv1 = space3.zeroVec()
+          val z = space2.zeroVec()
+          val vv1 = space2.zeroVec()
 
           mubSet.foreach { v =>
             assert(ubBitSet.get(v))
-            space3.intToVector(v, vv1)
-            assert(space3.maybeUnbiased(z, vv1), s"${vv1.toList}")
+            space2.intToVector(v, vv1)
+            assert(space2.maybeUnbiased(z, vv1), s"${vv1.toList}")
           }
 
-          val vv2 = space3.zeroVec()
+          val vv2 = space2.zeroVec()
           VectorSpace.allDistinctPairs(mubSet.toList)
             .foreach { case (v1, v2) =>
-              space3.intToVector(v1, vv1)
-              space3.intToVector(v2, vv2)
-              assert(space3.maybeUnbiased(vv1, vv2))
-              assert(space3.maybeUnbiased(vv2, vv1))
+              space2.intToVector(v1, vv1)
+              space2.intToVector(v2, vv2)
+              assert(space2.maybeUnbiased(vv1, vv2))
+              assert(space2.maybeUnbiased(vv2, vv1))
             }
         }
     }
@@ -254,11 +252,12 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       }
   }
 
-  test("Space detects standard d=3 mubs with n=8") {
+  test("Space detects standard d=3 mubs with n=32") {
+    val space5 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](3, 20)
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
       VectorSpace.allDistinctPairs(basis)
         .forall { case (v1, v2) =>
-          space3.isOrth(dot2(v1, v2))
+          space5.isOrth(dot2(v1, v2))
         }
 
     def areApproxUnbiased(basis1: List[List[Complex[Real]]], basis2: List[List[Complex[Real]]]): Boolean = {
@@ -266,7 +265,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       basis1.forall { v1 =>
         basis2.forall { v2 =>
-          space3.isUnbiased(dot2(v1, v2))
+          space5.isUnbiased(dot2(v1, v2))
         }
       }
     }

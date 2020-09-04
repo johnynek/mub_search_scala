@@ -55,13 +55,13 @@ object VectorSpace {
     // array lookup is faster
     private val rootArray: Array[C] = C.roots.toArray
 
-    override def toString: String = {
-      s"Space(dim = $dim, roots = ${rootArray.length} realBits = $realBits)"
-    }
+    private val nroots: Int = rootArray.length
 
-    val vectorCount: SafeLong = SafeLong(rootArray.length).pow(dim)
+    val vectorCount: SafeLong = SafeLong(nroots).pow(dim)
 
     require(vectorCount <= SafeLong(Int.MaxValue), s"we can't fit $vectorCount into an Int")
+
+    val standardCount: Int = (vectorCount / nroots).toInt
 
     val realD: Real = Real(dim)
 
@@ -77,19 +77,23 @@ object VectorSpace {
 
       val twoD = Real(2 * dim)
 
-      if (rootArray.length == 1) twoD
+      if (nroots == 1) twoD
       else {
         twoD * (((Real.one - C.reOmega)/Real.two).sqrt)
       }
     }
 
+    override def toString: String = {
+      s"Space(dim = $dim, roots = ${nroots} realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+    }
+
     def zeroVec(): Array[Int] = new Array[Int](dim)
 
     def vectorToInt(v: Array[Int]): Int = {
-      // consider this as a number base rootArray.length
+      // consider this as a number base nroots
       var idx = v.length
       var acc = 0
-      val size = rootArray.length
+      val size = nroots
       while (idx > 0) {
         idx = idx - 1
         acc = acc * size + v(idx)
@@ -99,10 +103,10 @@ object VectorSpace {
     }
 
     def intToVector(i: Int, into: Array[Int]): Unit = {
-      // consider this as a number base rootArray.length
+      // consider this as a number base nroots
       var idx = 0
       var value = i
-      val size = rootArray.length
+      val size = nroots
       while (idx < into.length) {
         into(idx) = value % size
         value = value / size
@@ -117,7 +121,7 @@ object VectorSpace {
       while (idx < v.length) {
         val vi = v(idx)
         val next = vi + 1
-        if (next < rootArray.length) {
+        if (next < nroots) {
           // this is valid
           v(idx) = next
           return true
@@ -149,9 +153,9 @@ object VectorSpace {
 
       var idx = 0
       while (idx < v1.length) {
-        val left = rootArray.length - v1(idx)
+        val left = nroots - v1(idx)
         val right = v2(idx)
-        target(idx) = (left + right) % rootArray.length
+        target(idx) = (left + right) % nroots
         idx = idx + 1
       }
     }
@@ -179,7 +183,7 @@ object VectorSpace {
       var acc = C.zero
       while (idx < v1.length) {
         val v1idx = v1(idx)
-        val left = rootArray(if (v1idx == 0) 0 else (rootArray.length - v1idx))
+        val left = rootArray(if (v1idx == 0) 0 else (nroots - v1idx))
         val right = rootArray(v2(idx))
         acc = C.plus(acc, C.times(left, right))
         idx = idx + 1
@@ -189,6 +193,12 @@ object VectorSpace {
     }
 
     val orthEps = eps.pow(2)
+    // we know |a|^2 <= d^2
+    // so if orthEps >= d^2 this is trivial
+    // and everything is orthogonal
+    val orthEpsIsTrivial: Boolean =
+      (orthEps - realD.pow(2)).compare(0) >= 0
+
     /**
      * the difference between the quantized
      * and the actual mag^2 is
@@ -203,6 +213,15 @@ object VectorSpace {
     }
 
     val ubEps = eps * (Real.two * realD.sqrt + eps)
+
+    // we know |a|^2 <= d^2
+    // so, ||a|^2 - d| <= d^2 - d
+    //
+    // so if ubEps >= d^2 - d this is trivial
+    // and everything is unbiased
+    val ubEpsIsTrivial: Boolean =
+      (ubEps - (realD.pow(2) - realD)).compare(0) >= 0
+
     /**
      * the difference between the quantized
      * and the actual mag^2 is
@@ -367,7 +386,9 @@ object VectorSpace {
      * in the response)
      */
     def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val vci = vectorCount.toInt / rootArray.length
+      val vci = vectorCount.toInt / nroots
+
+      //if (orthEpsIsTrivial) throw new IllegalStateException(s"orthEps is trivial: $orthEps >= ${realD.pow(2)}")
 
       buildCacheFuture(isOrth).flatMap { orthSet =>
         val fn = buildCachedFn(orthSet)
@@ -397,7 +418,7 @@ object VectorSpace {
      * and all have 0 in the final position
      */
     private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val vci = vectorCount.toInt / rootArray.length
+      val vci = vectorCount.toInt / nroots
 
       val fn = buildCachedFn(ubBitSet)
       val inc = nextFn(ubBitSet)
@@ -422,11 +443,14 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Array[Int]]] =
+    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
+      //if (ubEpsIsTrivial) throw new IllegalStateException(s"ubEps is trivial: $ubEps > ${(realD.pow(2) - realD)}")
+
       buildCacheFuture(isUnbiased)
         .flatMap { ubBitSet =>
           allMubVectorsFutureWithFn(cliqueSize, ubBitSet)
         }
+    }
 
     def allMubVectors(cliqueSize: Int): List[Array[Int]] =
       Await.result(allMubVectorsFuture(cliqueSize)(ExecutionContext.global), Inf)
