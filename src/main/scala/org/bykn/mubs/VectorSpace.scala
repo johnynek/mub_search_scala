@@ -294,19 +294,28 @@ object VectorSpace {
 
     private[this] val vectorRange = (0 until vectorCount.toInt)
 
-    def buildCache(fn: Real => Boolean): BitSet = {
+    def buildCacheFuture(fn: Real => Boolean)(implicit ec: ExecutionContext): Future[BitSet] = {
       // first we compute all the traces that are orthogonal
-      val tmp = new Array[Int](dim)
       // the java bitset doesn't box on access
       val bitset = new BitSet(vectorCount.toInt)
-      vectorRange
-        .foreach { v =>
-          intToVector(v, tmp)
-          if (fn(trace(tmp))) bitset.set(v)
+      val fut = Future
+        .traverse(vectorRange.grouped(10000).toList) { group =>
+          Future {
+            val tmp = new Array[Int](dim)
+            group.foreach { v =>
+              intToVector(v, tmp)
+              if (fn(trace(tmp))) {
+                bitset.synchronized { bitset.set(v) }
+              }
+            }
+          }
         }
 
-      bitset
+      fut.map(_ => bitset)
     }
+
+    def buildCache(fn: Real => Boolean): BitSet =
+      Await.result(buildCacheFuture(fn)(ExecutionContext.global), Inf)
 
     // this builds standardized bases:
     // to be orthogonal: you must also be orthogonal to 0
@@ -360,18 +369,19 @@ object VectorSpace {
     def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
       val vci = vectorCount.toInt / rootArray.length
 
-      val orthSet = buildCache(isOrth)
-      val fn = buildCachedFn(orthSet)
-      val inc = nextFn(orthSet)
-      // we use an array for the ints because it is more space efficient
-      // than lists
-      Cliques.findAllFuture[Int,Array[Int]](
-        size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
-        initNode = inc(0),
-        incNode = inc,
-        isLastNode = { i: Int => vci <= i },
-        fn,
-        { lst => lst.toArray })
+      buildCacheFuture(isOrth).flatMap { orthSet =>
+        val fn = buildCachedFn(orthSet)
+        val inc = nextFn(orthSet)
+        // we use an array for the ints because it is more space efficient
+        // than lists
+        Cliques.findAllFuture[Int,Array[Int]](
+          size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
+          initNode = inc(0),
+          incNode = inc,
+          isLastNode = { i: Int => vci <= i },
+          fn,
+          { lst => lst.toArray })
+      }
     }
 
     def allBases(): List[Array[Int]] =
@@ -386,22 +396,21 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    private def allMubVectorsFutureWithFn(cliqueSize: Int)(implicit ec: ExecutionContext): (BitSet, Future[List[Array[Int]]]) = {
+    private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
       val vci = vectorCount.toInt / rootArray.length
 
-      val ubBitSet = buildCache(isUnbiased)
       val fn = buildCachedFn(ubBitSet)
       val inc = nextFn(ubBitSet)
       // we use an array for the ints because it is more space efficient
       // than lists
 
-      (ubBitSet, Cliques.findAllFuture[Int,Array[Int]](
+      Cliques.findAllFuture[Int,Array[Int]](
         size = (cliqueSize - 1), // the number of items in a basis is the dimension
         initNode = inc(0),
         incNode = inc,
         isLastNode = { i: Int => vci <= i },
         fn,
-        { lst => lst.toArray }))
+        { lst => lst.toArray })
     }
 
     /**
@@ -413,10 +422,11 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val (_, fut) = allMubVectorsFutureWithFn(cliqueSize)
-      fut
-    }
+    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Array[Int]]] =
+      buildCacheFuture(isUnbiased)
+        .flatMap { ubBitSet =>
+          allMubVectorsFutureWithFn(cliqueSize, ubBitSet)
+        }
 
     def allMubVectors(cliqueSize: Int): List[Array[Int]] =
       Await.result(allMubVectorsFuture(cliqueSize)(ExecutionContext.global), Inf)
@@ -463,29 +473,36 @@ object VectorSpace {
      */
     def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[List[List[Array[Int]]]] = {
 
-      val (ubBitSet, mubs) = allMubVectorsFutureWithFn(cnt)
-      // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
-      // to transform them. We have to include the phantom 0 vector
-      def assemble(bases: List[Array[Int]], mubV: List[Array[Int]]): Future[List[List[Array[Int]]]] = {
-        require(bases.forall(_.size == dim - 1), "invalid basis size")
-        require(mubV.forall(_.size == (cnt - 1)), "invalid mub size")
-        // these are all sets of cnt bases
-        // in every possible order
-        val allHs: List[List[Array[Int]]] =
-          chooseN(cnt, bases)
+      buildCacheFuture(isUnbiased)
+        .flatMap { ubBitSet =>
 
-        Future.traverse(mubV) { ubv =>
-          Future {
-            allHs.flatMap { hs =>
-              transformStdBasis(hs, ubv, ubBitSet).toList
+          val mubs = allMubVectorsFutureWithFn(cnt, ubBitSet)
+          // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
+          // to transform them. We have to include the phantom 0 vector
+          def assemble(bases: List[Array[Int]], mubV: List[Array[Int]]): Future[List[List[Array[Int]]]] = {
+            require(bases.forall(_.size == dim - 1), "invalid basis size")
+            require(mubV.forall(_.size == (cnt - 1)), "invalid mub size")
+
+            Future.traverse(mubV) { ubv =>
+              Future {
+                // these are all sets of cnt bases
+                // in every possible order
+                //
+                // these are as cheap to compute as iterate so don't keep them
+                // in memory
+                chooseN(cnt, bases)
+                  .flatMap { hs =>
+                    transformStdBasis(hs, ubv, ubBitSet).toList
+                  }
+                  .toList
+              }
             }
+            .map(_.flatten)
           }
-        }
-        .map(_.flatten)
-      }
 
-      allBasesFuture().zip(mubs)
-        .flatMap { case (bases, mubV) => assemble(bases, mubV) }
+          allBasesFuture().zip(mubs)
+            .flatMap { case (bases, mubV) => assemble(bases, mubV) }
+        }
     }
 
     def allMubs(cnt: Int): List[List[Array[Int]]] =
@@ -495,14 +512,14 @@ object VectorSpace {
   // return lists of exactly n items where each item
   // comes from an index in items.
   // we do allow repeats, so we choose with replacement
-  def chooseN[A](n: Int, items: List[A]): List[List[A]] = {
+  def chooseN[A](n: Int, items: List[A]): Iterator[List[A]] = {
 
-    def loop(n: Int): List[List[A]] =
-      if (n <= 0) Nil :: Nil
+    def loop(n: Int): Iterator[List[A]] =
+      if (n <= 0) Iterator.single(Nil)
       else {
         // we could pick any first item
         // followed by picking n-1 from any items
-        items.flatMap { h =>
+        items.iterator.flatMap { h =>
           loop(n - 1).map(h :: _)
         }
       }
@@ -562,13 +579,15 @@ object SearchApp extends CommandApp(
     val depth = Opts.option[Int]("depth", "we use 2^depth roots of unity")
       .mapValidated { d =>
 
-        if ((0 <= d) && (d <= 4)) Validated.valid {
+        if ((0 <= d) && (d <= 6)) Validated.valid {
           d match {
             case 0 => { (d: Int, bits: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d, bits) }
             case 1 => { (d: Int, bits: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d, bits) }
             case 2 => { (d: Int, bits: Int) => new Space[Cyclotomic.N2, Cyclotomic.L2](d, bits) }
             case 3 => { (d: Int, bits: Int) => new Space[Cyclotomic.N3, Cyclotomic.L3](d, bits) }
             case 4 => { (d: Int, bits: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d, bits) }
+            case 5 => { (d: Int, bits: Int) => new Space[Cyclotomic.N5, Cyclotomic.L5](d, bits) }
+            case 6 => { (d: Int, bits: Int) => new Space[Cyclotomic.N6, Cyclotomic.L6](d, bits) }
           }
         }
         else Validated.invalidNel(s"invalid depth: $d")

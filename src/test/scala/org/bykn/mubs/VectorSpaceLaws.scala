@@ -110,7 +110,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   property("chooseN(n, x) returns x.length^n items each with exactly n items and no duplicates") {
     forAll(Gen.choose(0, 4), Gen.choose(0, 10).flatMap(Gen.listOfN(_, Gen.const(())))) { (n, x) =>
       // zipWithIndex to make each item unique
-      val items = VectorSpace.chooseN(n, x.zipWithIndex)
+      val items = VectorSpace.chooseN(n, x.zipWithIndex).toList
       assert(items.length == math.pow(x.length, n).toInt)
       assert(items.forall(_.length == n))
       assert(items.distinct == items)
