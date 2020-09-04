@@ -58,25 +58,29 @@ object Cliques {
         //
         // to be in the clique, you need to be
         // a neighbor to initNode and n
-        if (inClique(initNode)) {
-          val inClique2: A => Boolean = andN(nfn(initNode), inClique)
+        val withInit =
+          if (inClique(initNode)) {
+            val inClique2: A => Boolean = andN(nfn(initNode), inClique)
 
-          val withInit = findCheat(
-            size - 1,
-            nextNode,
-            incNode,
-            isLastNode,
-            inClique2,
-            nfn,
-            true,
-            Nil).map(initNode :: _)
+            findCheat(
+              size - 1,
+              nextNode,
+              incNode,
+              isLastNode,
+              inClique2,
+              nfn,
+              true,
+              Nil).map(initNode :: _)
+          }
+          else Nil
 
+        if (searchNext) {
           val acc1 = withInit reverse_::: acc
-          if (searchNext) find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true, acc1)
-          else acc1.reverse
+          find(size, nextNode, incNode, isLastNode, inClique, nfn, true, acc1)
         }
-        else if (searchNext) find(size, incNode(initNode), incNode, isLastNode, inClique, nfn, true, acc)
-        else acc.reverse
+        else {
+          acc reverse_::: withInit
+        }
       }
     }
 
@@ -107,8 +111,9 @@ object Cliques {
 
     Future.traverse(allNodes(initNode, incNode, isLastNode).toList) { n =>
       Future {
-        // we want to force inside the future
-        find(size, n, incNode, isLastNode, Function.const(true), buildNfn(), false, Nil)
+        // do this once per thread
+        val edgeFn = buildNfn()
+        find(size, n, incNode, isLastNode, Function.const(true), edgeFn, false, Nil)
           .map(repr)
       }
     }

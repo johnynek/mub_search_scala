@@ -65,14 +65,22 @@ object VectorSpace {
 
     val realD: Real = Real(dim)
 
+    /**
+     * This is 2d * sin(pi/n) when n>1, else 2d
+     */
     val eps: Real = {
       // theta = 2 pi / n
       // C.omega = e^(2 pi i / n)
       // C.omega ^(1/2) = e^(pi i /n)
-      // sin^2(theta/2) = (1 - cos(theta))/2
-      // 4d sin^2(theta/2) = 2d(1 - re(C.omega))
+      // sin(theta/2) = ((1 - cos(theta))/2).sqrt
+      // 2d sin(theta/2) = 2d((1 - re(C.omega))/2).sqrt
 
-      Real(2 * dim) * (Real.one - C.reOmega)
+      val twoD = Real(2 * dim)
+
+      if (rootArray.length == 1) twoD
+      else {
+        twoD * (((Real.one - C.reOmega)/Real.two).sqrt)
+      }
     }
 
     def zeroVec(): Array[Int] = new Array[Int](dim)
@@ -165,7 +173,7 @@ object VectorSpace {
     }
 
     // we do the conjugate on the left
-    def dotAbs(v1: Array[Int], v2: Array[Int]): Real = {
+    def dotAbs2(v1: Array[Int], v2: Array[Int]): Real = {
       require(v1.length == v2.length)
       var idx = 0
       var acc = C.zero
@@ -180,15 +188,30 @@ object VectorSpace {
       C.abs2(acc)
     }
 
+    val orthEps = eps.pow(2)
+    /**
+     * the difference between the quantized
+     * and the actual mag^2 is
+     * 2 |<u, v>| eps + eps^2
+     * for orthogonal vectors, that reduces
+     * to eps^2
+     */
     def isOrth(r: Real): Boolean = {
-      val diff = r - eps
-
+      val diff = r - orthEps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
 
+    val ubEps = eps * (Real.two * realD.sqrt + eps)
+    /**
+     * the difference between the quantized
+     * and the actual mag^2 is
+     * 2 |<u, v>| eps + eps^2
+     * for unbiased vectors, that reduces
+     * to eps * (2 d.sqrt +  eps)
+     */
     def isUnbiased(r: Real): Boolean = {
-      val diff = (r - realD).abs - eps
+      val diff = (r - realD).abs - ubEps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
@@ -196,15 +219,16 @@ object VectorSpace {
     def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // acc <= 4d sin^2(pi / n)
-      isOrth(dotAbs(v1, v2))
+      isOrth(dotAbs2(v1, v2))
 
     def maybeUnbiased(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // |acc - d| <= 4d sin^2(pi / n)
-      isUnbiased(dotAbs(v1, v2))
+      isUnbiased(dotAbs2(v1, v2))
 
     // we represent each hadamard as a set of indices into the roots
-    def isApproximatelyOrthogonal(vectors: List[Array[Int]]): Boolean = {
+    @annotation.tailrec
+    final def isApproximatelyOrthogonal(vectors: List[Array[Int]]): Boolean = {
       vectors match {
         case Nil => true
         case h :: rest =>
@@ -270,7 +294,7 @@ object VectorSpace {
 
     private[this] val vectorRange = (0 until vectorCount.toInt)
 
-    private def buildCache(fn: Real => Boolean): BitSet = {
+    def buildCache(fn: Real => Boolean): BitSet = {
       // first we compute all the traces that are orthogonal
       val tmp = new Array[Int](dim)
       // the java bitset doesn't box on access
@@ -289,16 +313,12 @@ object VectorSpace {
     // to be unbiased, you must be unbiased to 0
     //
     // return the first index in the set
-    private def buildCachedFn(bitset: BitSet): (Int, () => Int => Int => Boolean) = {
+    private def buildCachedFn(bitset: BitSet): () => Int => Int => Boolean = {
       // first we compute all the traces that are orthogonal
-
-      // there should be at least one
-      val first = vectorRange.iterator.filter(bitset.get(_)).next()
-      // now we have the whole bitset,
 
       val cp = conjProdInt
 
-      val res = () => {
+      () => {
         val intCP = cp()
 
         { n1: Int =>
@@ -306,7 +326,7 @@ object VectorSpace {
 
             { n2: Int =>
 
-              (bitset.get(n2)) && {
+              bitset.get(n2) && {
                 val n3 = intCP(n1, n2)
                 bitset.get(n3)
               }
@@ -316,7 +336,19 @@ object VectorSpace {
         }
       }
 
-      (first, res)
+    }
+
+    def nextFn(set: BitSet): Int => Int = {
+      val vci = vectorCount.toInt
+
+      { (i: Int) =>
+        var res = i + 1
+        var cont = true
+        while (!(set.get(res) || (vci <= res))) {
+          res = res + 1
+        }
+        res
+      }
     }
 
     /**
@@ -328,13 +360,15 @@ object VectorSpace {
     def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
       val vci = vectorCount.toInt / rootArray.length
 
-      val (first, fn) = buildCachedFn(buildCache(isOrth))
+      val orthSet = buildCache(isOrth)
+      val fn = buildCachedFn(orthSet)
+      val inc = nextFn(orthSet)
       // we use an array for the ints because it is more space efficient
       // than lists
       Cliques.findAllFuture[Int,Array[Int]](
         size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
-        initNode = first,
-        incNode = { i: Int => i + 1},
+        initNode = inc(0),
+        incNode = inc,
         isLastNode = { i: Int => vci <= i },
         fn,
         { lst => lst.toArray })
@@ -356,13 +390,15 @@ object VectorSpace {
       val vci = vectorCount.toInt / rootArray.length
 
       val ubBitSet = buildCache(isUnbiased)
-      val (first, fn) = buildCachedFn(ubBitSet)
+      val fn = buildCachedFn(ubBitSet)
+      val inc = nextFn(ubBitSet)
       // we use an array for the ints because it is more space efficient
       // than lists
+
       (ubBitSet, Cliques.findAllFuture[Int,Array[Int]](
         size = (cliqueSize - 1), // the number of items in a basis is the dimension
-        initNode = first,
-        incNode = { i: Int => i + 1},
+        initNode = inc(0),
+        incNode = inc,
         isLastNode = { i: Int => vci <= i },
         fn,
         { lst => lst.toArray }))
@@ -507,8 +543,21 @@ object SearchApp extends CommandApp(
     val goalMubs = Opts.option[Int]("mubs", "the number of mutually unbiased bases we try to find")
       .orNone
 
-    val threads = Opts.option[Int]("threads", "number of threads to use, default = number of processors")
-      .withDefault(Runtime.getRuntime().availableProcessors())
+    val threads: Opts[(ExecutionContext => Unit) => Unit] =
+      Opts.option[Int]("threads", "number of threads to use, default = number of processors")
+        .withDefault(Runtime.getRuntime().availableProcessors())
+        .map { t =>
+          { (callback: ExecutionContext => Unit) =>
+            val eserv = Executors.newFixedThreadPool(t)
+            try {
+              val ec = ExecutionContext.fromExecutorService(eserv)
+              callback(ec)
+            }
+            finally {
+              eserv.shutdown()
+            }
+          }
+        }
 
     val depth = Opts.option[Int]("depth", "we use 2^depth roots of unity")
       .mapValidated { d =>
@@ -525,39 +574,80 @@ object SearchApp extends CommandApp(
         else Validated.invalidNel(s"invalid depth: $d")
       }
 
-    realBits
-      .product(dim)
-      .product(depth)
-      .map { case ((b, d), fn) => fn(d, b) }
-      .product(goalMubs)
-      .product(threads)
-      .map { case ((space, mubsOpt), threads) =>
-        // dim is the most we can get
-        val mubs = mubsOpt.getOrElse(space.dim)
+    val spaceOpt =
+      realBits
+        .product(dim)
+        .product(depth)
+        .map { case ((b, d), fn) => fn(d, b) }
 
-        val eserv = Executors.newFixedThreadPool(threads)
-        implicit val ec = ExecutionContext.fromExecutorService(eserv)
-        println(s"# $space")
-        val mubsVector = Await.result(space.allMubsFuture(mubs), Inf)
-        println(s"# found: ${mubsVector.length}")
-        var idx = 0
-        val ary = new Array[Int](space.dim)
+    val search =
+      (spaceOpt, goalMubs, threads)
+        .mapN { (space, mubsOpt, cont) =>
+          // dim is the most we can get
+          val mubs = mubsOpt.getOrElse(space.dim)
 
-        mubsVector.foreach { clique =>
-          def showBasis(v: List[Array[Int]]): String = {
-            def showInt(i: Int): String = {
-              space.intToVector(i, ary)
-              ary.mkString("[", ", ", "]")
+          cont { implicit ec =>
+            println(s"# $space")
+            val mubsVector = Await.result(space.allMubsFuture(mubs), Inf)
+            println(s"# found: ${mubsVector.length}")
+            var idx = 0
+            val ary = new Array[Int](space.dim)
+
+            mubsVector.foreach { clique =>
+              def showBasis(v: List[Array[Int]]): String = {
+                def showInt(i: Int): String = {
+                  space.intToVector(i, ary)
+                  ary.mkString("[", ", ", "]")
+                }
+                v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
+              }
+
+              val cliqueStr = showBasis(clique)
+              println(s"$idx: $cliqueStr")
+              idx = idx + 1
             }
-            v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
           }
-
-          val cliqueStr = showBasis(clique)
-          println(s"$idx: $cliqueStr")
-          idx = idx + 1
         }
 
-        eserv.shutdown()
-      }
+
+    val info =
+      (spaceOpt,
+        threads,
+        Opts.flag("bases", "compute all the standard bases and give the size").orFalse,
+        goalMubs)
+        .mapN { (space, cont, bases, mubsOpt) =>
+          cont { implicit ec =>
+            println(s"# $space")
+            val f1 = if (bases) {
+              space.allBasesFuture().flatMap { bases =>
+                Future {
+                  println(s"there are ${bases.length} bases")
+                  mubsOpt.foreach { mub =>
+                    val sl = SafeLong(bases.length)
+                    val comb = sl.pow(mub)
+                    println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
+                  }
+                }
+              }
+            } else Future.unit
+
+            val f2 = mubsOpt match {
+              case Some(cliqueSize) =>
+                space.allMubVectorsFuture(cliqueSize).flatMap { bases =>
+                  Future {
+                    println(s"there are ${bases.length} sets of mutually unbiased vectors of clique size = $cliqueSize")
+                  }
+                }
+              case None =>
+                Future.unit
+            }
+
+            Await.result(f1.zip(f2), Inf)
+          }
+        }
+
+    Opts.subcommand("search", "run a search for mubs")(search)
+      .orElse(
+        Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
   }
 )
