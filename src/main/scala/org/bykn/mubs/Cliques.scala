@@ -109,14 +109,24 @@ object Cliques {
     buildNfn: () => A => A => Boolean,
     repr: List[A] => C)(implicit ec: ExecutionContext): Future[List[C]] = {
 
-    Future.traverse(allNodes(initNode, incNode, isLastNode).toList) { n =>
-      Future {
-        // do this once per thread
-        val edgeFn = buildNfn()
-        find(size, n, incNode, isLastNode, Function.const(true), edgeFn, false, Nil)
-          .map(repr)
+    allNodes(initNode, incNode, isLastNode)
+      .iterator
+      .grouped(10000)
+      .foldLeft(Future.successful(List.empty[C])) { (accF, batch) =>
+        val items = Future.traverse(batch.toList) { n =>
+          Future {
+            // do this once per thread
+            val edgeFn = buildNfn()
+            find(size, n, incNode, isLastNode, Function.const(true), edgeFn, false, Nil)
+          }
+        }
+
+        for {
+          acc <- accF
+          batchCliques <- items
+          head = batchCliques.filter(_.nonEmpty).map(_.map(repr))
+        } yield head.flatten reverse_::: acc
       }
-    }
-    .map(_.flatten)
+      .map(_.reverse)
   }
 }
