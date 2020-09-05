@@ -109,24 +109,38 @@ object Cliques {
     buildNfn: () => A => A => Boolean,
     repr: List[A] => C)(implicit ec: ExecutionContext): Future[List[C]] = {
 
-    allNodes(initNode, incNode, isLastNode)
+    val it = allNodes(initNode, incNode, isLastNode)
       .iterator
       .grouped(10000)
-      .foldLeft(Future.successful(List.empty[C])) { (accF, batch) =>
-        val items = Future.traverse(batch.toList) { n =>
+
+    def next(): Option[List[A]] =
+      it.synchronized {
+        if (it.hasNext) Some(it.next().toList)
+        else None
+      }
+
+    def step(batch: List[A]): Future[List[C]] =
+        Future.traverse(batch) { n =>
           Future {
             // do this once per thread
             val edgeFn = buildNfn()
             find(size, n, incNode, isLastNode, Function.const(true), edgeFn, false, Nil)
           }
         }
+        .map(_.filter(_.nonEmpty).flatMap(_.map(repr)))
 
-        for {
-          acc <- accF
-          batchCliques <- items
-          head = batchCliques.filter(_.nonEmpty).map(_.map(repr))
-        } yield head.flatten reverse_::: acc
+
+    def result(): Future[List[C]] =
+      next() match {
+        case None => Future.successful(List.empty)
+        case Some(batch) =>
+          for {
+            head <- step(batch)
+            // we don't work on the next batch until the previous is done
+            tail <- result()
+          } yield head ::: tail
       }
-      .map(_.reverse)
+
+    result()
   }
 }
