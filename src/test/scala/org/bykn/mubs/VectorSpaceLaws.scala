@@ -11,7 +11,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim, 20)
 
   val genInt: Gen[Int] =
-    Gen.choose(0, space.vectorCount.toInt - 1)
+    Gen.choose(0, space.standardCount - 1)
 
   val genVec: Gen[Array[Int]] =
     genInt
@@ -143,7 +143,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     (0 until space2.standardCount).foreach { v =>
       val v1 = nextFn(v)
 
-      assert(ubBitSet.get(v1) || (v1 >= space2.standardCount), s"v = $v, v1 = $v1")
+      assert(ubBitSet.get(v1) || (v1 >= space2.standardCount), s"v = $v, v1 = $v1, count = ${space2.standardCount}")
     }
 
     (1 to 3).foreach { mubSize =>
@@ -153,9 +153,15 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()
 
+          val nonStandards = mubSet.filter(_ >= space2.standardCount).toList
+          val allOrth0 = Cliques.allNodes[Int](nextFn(0), nextFn, { i => i >= (space2.standardCount - 1) }).toList
+          assert(nonStandards == Nil, s"non-standards: $nonStandards, ${mubSet.toList}, allOrth0 = $allOrth0")
+
           mubSet.foreach { v =>
-            assert(ubBitSet.get(v))
+            // all mubs are standard:
             space2.intToVector(v, vv1)
+            assert(vv1(vv1.length - 1) == 0, s"last = ${vv1(vv1.length - 1)}")
+            assert(ubBitSet.get(v), s"v = $v")
             assert(space2.maybeUnbiased(z, vv1), s"${vv1.toList}")
           }
 
@@ -170,13 +176,6 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
         }
     }
   }
-  // Test ideas
-  // 1. allMubs: all are unbiased to 0 and each other.
-  // 2. if you select a random candidate, if it is unbiased
-  //    to all in a set, there is another set that contains it
-  //    with all the other items
-  //
-  // 3. allBases: each set is mutually orth and orth to 0
 
   //
   // Here we check some of the properties for the case of d = 3

@@ -59,8 +59,9 @@ object VectorSpace {
 
     val vectorCount: SafeLong = SafeLong(nroots).pow(dim)
 
-    require(vectorCount <= SafeLong(Int.MaxValue), s"we can't fit $vectorCount into an Int")
 
+    // we always set the last vector element to exp(2 pi i * 0) = 1
+    require(vectorCount/nroots <= SafeLong(Int.MaxValue), s"we can't fit ${vectorCount/nroots} into an Int")
     val standardCount: Int = (vectorCount / nroots).toInt
 
     val realD: Real = Real(dim)
@@ -311,14 +312,12 @@ object VectorSpace {
       count
     }
 
-    private[this] val vectorRange = (0 until vectorCount.toInt)
-
     def buildCacheFuture(fn: Real => Boolean)(implicit ec: ExecutionContext): Future[BitSet] = {
       // first we compute all the traces that are orthogonal
       // the java bitset doesn't box on access
-      val bitset = new BitSet(vectorCount.toInt)
+      val bitset = new BitSet(standardCount)
       val fut = Future
-        .traverse(vectorRange.grouped(10000).toList) { group =>
+        .traverse((0 until standardCount).grouped(10000).toList) { group =>
           Future {
             val tmp = new Array[Int](dim)
             group.foreach { v =>
@@ -366,18 +365,15 @@ object VectorSpace {
 
     }
 
-    def nextFn(set: BitSet): Int => Int = {
-      val vci = vectorCount.toInt
-
+    def nextFn(set: BitSet): Int => Int =
       { (i: Int) =>
         var res = i + 1
         var cont = true
-        while (!(set.get(res) || (vci <= res))) {
+        while (!(set.get(res) || (standardCount <= res))) {
           res = res + 1
         }
         res
       }
-    }
 
     /**
      * These are all standardized Hadamards:
@@ -386,8 +382,6 @@ object VectorSpace {
      * in the response)
      */
     def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val vci = vectorCount.toInt / nroots
-
       //if (orthEpsIsTrivial) throw new IllegalStateException(s"orthEps is trivial: $orthEps >= ${realD.pow(2)}")
 
       buildCacheFuture(isOrth).flatMap { orthSet =>
@@ -399,7 +393,7 @@ object VectorSpace {
           size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
           initNode = inc(0),
           incNode = inc,
-          isLastNode = { i: Int => vci <= i },
+          isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
           fn,
           { lst => lst.toArray })
       }
@@ -418,8 +412,6 @@ object VectorSpace {
      * and all have 0 in the final position
      */
     private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[Array[Int]]] = {
-      val vci = vectorCount.toInt / nroots
-
       val fn = buildCachedFn(ubBitSet)
       val inc = nextFn(ubBitSet)
       // we use an array for the ints because it is more space efficient
@@ -429,7 +421,7 @@ object VectorSpace {
         size = (cliqueSize - 1), // the number of items in a basis is the dimension
         initNode = inc(0),
         incNode = inc,
-        isLastNode = { i: Int => vci <= i },
+        isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
         fn,
         { lst => lst.toArray })
     }
