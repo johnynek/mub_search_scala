@@ -10,7 +10,7 @@ object Cliques {
    * begin with the same item
    */
   sealed abstract class Family[+A] {
-    def cliques: NonEmptyList[List[A]]
+    def cliques: LazyList[List[A]]
     def cliqueSize: Int
     // return the same cliqueSize family
     // such that all items have true
@@ -18,7 +18,7 @@ object Cliques {
   }
   object Family {
     final case object Empty extends Family[Nothing] {
-      def cliques = NonEmptyList(Nil, Nil)
+      def cliques = LazyList(Nil)
       def cliqueSize: Int = 0
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
     }
@@ -26,7 +26,7 @@ object Cliques {
     // 1. all items in tails have the same cliqueSize
     // 2. head < all heads in tails
     final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
-      def cliques = tails.flatMap { tail => tail.cliques.map(head :: _) }
+      def cliques = tails.toList.to(LazyList).flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
       def filter(fn: A => Boolean): Option[Family[A]] =
         if (fn(head)) {
@@ -133,25 +133,28 @@ object Cliques {
    * the memory for all the smaller internal cliques
    * which can be a significant memory savings
    */
-  def async[A](
+  def async[A: Ordering](
     size: Int,
     initNode: A,
     incNode: A => A,
     isLastNode: A => Boolean,
-    buildNfn: () => A => A => Boolean,
-    lessThan: (A, A) => Boolean)(implicit ec: ExecutionContext): Future[List[List[A]]] = {
+    buildNfn: () => A => A => Boolean)(implicit ec: ExecutionContext): Future[List[Family[A]]] = {
       def all = allNodes(initNode, incNode, isLastNode).iterator
 
-      def loop(size: Int): Future[List[List[A]]] =
+      def loop(size: Int): Future[List[Family[A]]] =
         if (size <= 1) {
           // there are no cliques with negative size
           // there is exactly 1 clique with 0 size
           // and each node can be in a clique of size 1
           if (size < 0) Future.successful(Nil)
-          else if (size == 0) Future.successful(Nil :: Nil)
-          else Future.successful(all.map(_ :: Nil).toList)
+          else if (size == 0) Future.successful(Family.Empty :: Nil)
+          else {
+            val emptyChildren = NonEmptyList(Family.Empty, Nil)
+            Future.successful(all.map(Family.NonEmpty(_, emptyChildren)).toList)
+          }
         }
         else {
+          val ord = implicitly[Ordering[A]]
           loop(size - 1)
             .flatMap { smaller =>
               if (smaller.isEmpty) Future.successful(Nil)
@@ -162,15 +165,17 @@ object Cliques {
                     val nfn = buildNfn()
                     val neighborToN1 = nfn(n1)
 
-                    // we enumerate all the previous items and see if we can find more
-                    smaller
-                      .filter { clique =>
-                        // since size >= 2, previous clique size is not empty, so .head is okay
-                        val isSmaller = lessThan(n1, clique.head)
+                    val n1Children =
+                      smaller
+                        .flatMap {
+                          case f@Family.NonEmpty(h, rest) if ord.lt(n1, h) && neighborToN1(h) =>
+                            f.filter(neighborToN1)
+                          case _ =>
+                            None
+                        }
 
-                        isSmaller && clique.forall(neighborToN1)
-                      }
-                      .map(n1 :: _)
+                    NonEmptyList.fromList(n1Children)
+                      .map(Family.NonEmpty(n1, _))
                   }
                 } { _.flatten }
               }

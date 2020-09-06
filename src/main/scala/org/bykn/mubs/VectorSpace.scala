@@ -381,7 +381,7 @@ object VectorSpace {
      * and they all include the all 0 vector (which is omitted
      * in the response)
      */
-    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[List[Int]]] = {
+    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
       //if (orthEpsIsTrivial) throw new IllegalStateException(s"orthEps is trivial: $orthEps >= ${realD.pow(2)}")
 
       buildCacheFuture(isOrth).flatMap { orthSet =>
@@ -394,12 +394,11 @@ object VectorSpace {
           initNode = inc(0),
           incNode = inc,
           isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
-          fn,
-          {(_ < _)})
+          fn)
       }
     }
 
-    def allBases(): List[List[Int]] =
+    def allBases(): List[Cliques.Family[Int]] =
       Await.result(allBasesFuture()(ExecutionContext.global), Inf)
 
     /**
@@ -411,7 +410,7 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[List[Int]]] = {
+    private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
       val fn = buildCachedFn(ubBitSet)
       val inc = nextFn(ubBitSet)
       // we use an array for the ints because it is more space efficient
@@ -422,8 +421,7 @@ object VectorSpace {
         initNode = inc(0),
         incNode = inc,
         isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
-        fn,
-        {(_ < _)})
+        fn)
     }
 
     /**
@@ -435,7 +433,7 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[List[Int]]] = {
+    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
       //if (ubEpsIsTrivial) throw new IllegalStateException(s"ubEps is trivial: $ubEps > ${(realD.pow(2) - realD)}")
 
       buildCacheFuture(isUnbiased)
@@ -444,7 +442,7 @@ object VectorSpace {
         }
     }
 
-    def allMubVectors(cliqueSize: Int): List[List[Int]] =
+    def allMubVectors(cliqueSize: Int): List[Cliques.Family[Int]] =
       Await.result(allMubVectorsFuture(cliqueSize)(ExecutionContext.global), Inf)
 
     // transform all but the first with a the corresponding mub
@@ -456,9 +454,9 @@ object VectorSpace {
           val cp = conjProdInt()
           // we use conjugate product to transform, but we could also not use conjugate (since
           // conjugate of H is another H
-          require(rest.size == mub.length)
+          require(rest.size == mub.size)
           val restz: List[List[Int]] =
-            mub.toList.zip(rest)
+            mub.zip(rest)
               .map { case (z, had) =>
                 (cp(z, 0) :: had.map(cp(z, _)))
               }
@@ -495,9 +493,9 @@ object VectorSpace {
           val mubs = allMubVectorsFutureWithFn(cnt, ubBitSet)
           // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
           // to transform them. We have to include the phantom 0 vector
-          def assemble(bases: List[List[Int]], mubV: List[List[Int]]): Future[List[List[List[Int]]]] = {
-            require(bases.forall(_.size == dim - 1), "invalid basis size")
-            require(mubV.forall(_.size == (cnt - 1)), "invalid mub size")
+          def assemble(bases: List[Cliques.Family[Int]], mubV: List[Cliques.Family[Int]]): Future[List[List[List[Int]]]] = {
+            require(bases.forall(_.cliqueSize == dim - 1), "invalid basis size")
+            require(mubV.forall(_.cliqueSize == (cnt - 1)), "invalid mub size")
 
             Future.traverse(mubV) { ubv =>
               Future {
@@ -506,9 +504,13 @@ object VectorSpace {
                 //
                 // these are as cheap to compute as iterate so don't keep them
                 // in memory
-                chooseN(cnt, bases)
+                chooseN(cnt, bases.flatMap(_.cliques.toList))
                   .flatMap { hs =>
-                    transformStdBasis(hs, ubv, ubBitSet).toList
+                    ubv
+                      .cliques
+                      .flatMap { mub =>
+                        transformStdBasis(hs, mub, ubBitSet)
+                      }
                   }
                   .toList
               }
@@ -528,7 +530,7 @@ object VectorSpace {
   // return lists of exactly n items where each item
   // comes from an index in items.
   // we do allow repeats, so we choose with replacement
-  def chooseN[A](n: Int, items: List[A]): Iterator[List[A]] = {
+  def chooseN[A](n: Int, items: Iterable[A]): Iterator[List[A]] = {
 
     def loop(n: Int): Iterator[List[A]] =
       if (n <= 0) Iterator.single(Nil)
@@ -624,7 +626,8 @@ object SearchApp extends CommandApp(
 
           cont { implicit ec =>
             println(s"# $space")
-            val mubsVector = Await.result(space.allMubsFuture(mubs), Inf)
+            val mubsVector =
+              Await.result(space.allMubsFuture(mubs), Inf)
             println(s"# found: ${mubsVector.length}")
             var idx = 0
             val ary = new Array[Int](space.dim)
@@ -655,8 +658,11 @@ object SearchApp extends CommandApp(
           cont { implicit ec =>
             println(s"# $space")
             val f1 = if (bases) {
-              space.allBasesFuture().flatMap { bases =>
+              space.allBasesFuture().flatMap { bases0 =>
                 Future {
+                  val bases: LazyList[List[Int]] =
+                    bases0.to(LazyList).flatMap(_.cliques)
+
                   println(s"there are ${bases.length} bases")
                   mubsOpt.foreach { mub =>
                     val sl = SafeLong(bases.length)
@@ -669,8 +675,11 @@ object SearchApp extends CommandApp(
 
             val f2 = mubsOpt match {
               case Some(cliqueSize) =>
-                space.allMubVectorsFuture(cliqueSize).flatMap { bases =>
+                space.allMubVectorsFuture(cliqueSize).flatMap { bases0 =>
                   Future {
+                    val bases: LazyList[List[Int]] =
+                      bases0.to(LazyList).flatMap(_.cliques)
+
                     println(s"there are ${bases.length} sets of mutually unbiased vectors of clique size = $cliqueSize")
                   }
                 }

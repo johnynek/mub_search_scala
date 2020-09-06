@@ -153,26 +153,30 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()
 
-          val nonStandards = mubSet.filter(_ >= space2.standardCount).toList
+          val nonStandards = mubSet.cliques.flatMap(_.filter(_ >= space2.standardCount))
           val allOrth0 = Cliques.allNodes[Int](nextFn(0), nextFn, { i => i >= (space2.standardCount - 1) }).toList
-          assert(nonStandards == Nil, s"non-standards: $nonStandards, ${mubSet.toList}, allOrth0 = $allOrth0")
+          assert(nonStandards == Nil, s"non-standards: $nonStandards, ${mubSet.cliques}, allOrth0 = $allOrth0")
 
-          mubSet.foreach { v =>
-            // all mubs are standard:
-            space2.intToVector(v, vv1)
-            assert(vv1(vv1.length - 1) == 0, s"last = ${vv1(vv1.length - 1)}")
-            assert(ubBitSet.get(v), s"v = $v")
-            assert(space2.maybeUnbiased(z, vv1), s"${vv1.toList}")
+          mubSet.cliques.foreach { mub =>
+            mub.foreach { v =>
+              // all mubs are standard:
+              space2.intToVector(v, vv1)
+              assert(vv1(vv1.length - 1) == 0, s"last = ${vv1(vv1.length - 1)}")
+              assert(ubBitSet.get(v), s"v = $v")
+              assert(space2.maybeUnbiased(z, vv1), s"${vv1.toList}")
+            }
           }
 
           val vv2 = space2.zeroVec()
-          VectorSpace.allDistinctPairs(mubSet.toList)
-            .foreach { case (v1, v2) =>
-              space2.intToVector(v1, vv1)
-              space2.intToVector(v2, vv2)
-              assert(space2.maybeUnbiased(vv1, vv2))
-              assert(space2.maybeUnbiased(vv2, vv1))
-            }
+          mubSet.cliques.foreach { mub =>
+            VectorSpace.allDistinctPairs(mub)
+              .foreach { case (v1, v2) =>
+                space2.intToVector(v1, vv1)
+                space2.intToVector(v2, vv2)
+                assert(space2.maybeUnbiased(vv1, vv2))
+                assert(space2.maybeUnbiased(vv2, vv1))
+              }
+          }
         }
     }
   }

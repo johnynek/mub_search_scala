@@ -64,9 +64,9 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     }
 
     val cliq3 = timeit(s"async $size $maxNodes") {
-      val cliqres = Cliques.async(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, { (_: Int) < (_: Int) })
+      val cliqres = Cliques.async(size, 0, next, last, () => { n1: Int => nfn(n1, _) })
       Await.result(cliqres, Inf)
-        .map(_.toList)
+        .flatMap(_.cliques)
     }
 
     cliq.forall(isClique(_)(nfn)) &&
