@@ -389,13 +389,13 @@ object VectorSpace {
         val inc = nextFn(orthSet)
         // we use an array for the ints because it is more space efficient
         // than lists
-        Cliques.findAllFuture[Int,Array[Int]](
+        Cliques.async[Int](
           size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
           initNode = inc(0),
           incNode = inc,
           isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
           fn,
-          { lst => lst.toArray })
+          {(_ < _)})
       }
     }
 
@@ -417,13 +417,13 @@ object VectorSpace {
       // we use an array for the ints because it is more space efficient
       // than lists
 
-      Cliques.findAllFuture[Int,Array[Int]](
+      Cliques.async[Int](
         size = (cliqueSize - 1), // the number of items in a basis is the dimension
         initNode = inc(0),
         incNode = inc,
         isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
         fn,
-        { lst => lst.toArray })
+        {(_ < _)})
     }
 
     /**

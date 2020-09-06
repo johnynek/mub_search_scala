@@ -40,17 +40,36 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       .filter(isClique(_)(nfn))
   }
 
+  def timeit[A](name: String)(a: => A): A = {
+    val start = System.nanoTime()
+    val res = a
+    val nanos = System.nanoTime() - start
+    //println(s"$name: ${nanos/1e6}ms")
+    res
+  }
+
   def isCliqueLaw(size: Int, maxNodes: Int)(nfn: (Int, Int) => Boolean): Prop = {
     val next: Int => Int = _ + 1
     val last: Int => Boolean = _ >= maxNodes
 
     val nodes = Cliques.allNodes(0, next, last)
 
-    val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, identity[List[Int]])
+    val cliqres2 = timeit(s"sync $size $maxNodes")(Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }, (i, j) => i < j).toList)
 
-    val cliq = Await.result(cliqres.map(_.toList), Inf)
+    val cliq = timeit(s"findAllFuture $size $maxNodes") {
+      val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, identity[List[Int]])
+      Await.result(cliqres.map(_.toList), Inf)
+    }
 
-    cliq.forall(isClique(_)(nfn))
+    val cliq3 = timeit(s"async $size $maxNodes") {
+      val cliqres = Cliques.async(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, { (_: Int) < (_: Int) })
+      Await.result(cliqres, Inf)
+        .map(_.toList)
+    }
+
+    cliq.forall(isClique(_)(nfn)) &&
+      cliqres2.forall(isClique(_)(nfn)) &&
+      cliq3.forall(isClique(_)(nfn))
   }
 
   def matchLaw(size: Int, maxNodes: Int)(nfn: (Int, Int) => Boolean): Prop = {
@@ -60,17 +79,21 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     val nodes = Cliques.allNodes(0, next, last)
 
     val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, identity[List[Int]])
+    val cliqres2 = Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }, (i, j) => i < j)
+
     val naive = naiveCliques(size, nodes, nfn).toList
 
     val cliq = Await.result(cliqres.map(_.toList), Inf)
 
     val res = (cliq == naive)
+    val res2 = (cliqres2.toList == naive)
 
-    if (!res) {
-      println(s"$cliq != $naive")
+    if (!(res && res2)) {
+      if (!res) println(s"$cliq\n\n!=\n\n$naive")
+      if (!res2) println(s"$cliqres2\n\n!=\n\n$naive")
     }
 
-    res
+    res && res2
   }
 
   property("for cliques of size 2 we emit only cliques") {
