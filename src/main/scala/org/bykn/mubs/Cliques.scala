@@ -96,47 +96,64 @@ object Cliques {
       .takeWhile(_.isDefined)
       .map(_.get)
 
-  def async[@specialized(Int) A: ClassTag](
+  /**
+   * By using Lists as the clique type we can share
+   * the memory for all the smaller internal cliques
+   * which can be a significant memory savings
+   */
+  def async[A](
     size: Int,
     initNode: A,
     incNode: A => A,
     isLastNode: A => Boolean,
     buildNfn: () => A => A => Boolean,
-    lessThan: (A, A) => Boolean)(implicit ec: ExecutionContext): Future[List[Array[A]]] = {
+    lessThan: (A, A) => Boolean)(implicit ec: ExecutionContext): Future[List[List[A]]] = {
       def all = allNodes(initNode, incNode, isLastNode).iterator
 
-      val empty: Array[A] = new Array[A](0)
-
-      def loop(size: Int): Future[List[Array[A]]] =
-        if (size <= 0) Future.successful(empty :: Nil)
-        else if (size == 1) Future.successful(all.map(Array(_)).toList)
+      def loop(size: Int): Future[List[List[A]]] =
+        if (size <= 1) {
+          // there are no cliques with negative size
+          // there is exactly 1 clique with 0 size
+          // and each node can be in a clique of size 1
+          if (size < 0) Future.successful(Nil)
+          else if (size == 0) Future.successful(Nil :: Nil)
+          else Future.successful(all.map(_ :: Nil).toList)
+        }
         else {
           loop(size - 1)
             .flatMap { smaller =>
-              // now we see which of these we can add a single node to:
-              batched(all, 1000) { n1 =>
-                Future {
-                  val nfn = buildNfn()
-                  val neighborToN1 = nfn(n1)
+              if (smaller.isEmpty) Future.successful(Nil)
+              else {
+                // now we see which of these we can add a single node to:
+                batched(all, 1000) { n1 =>
+                  Future {
+                    val nfn = buildNfn()
+                    val neighborToN1 = nfn(n1)
 
-                  // we enumerate all the previous items and see if we can find more
-                  smaller
-                    .filter { clique =>
-                      // since size >= 2, previous clique size is not empty, so .head is okay
-                      val isSmaller = lessThan(n1, clique(0))
+                    // we enumerate all the previous items and see if we can find more
+                    smaller
+                      .filter { clique =>
+                        // since size >= 2, previous clique size is not empty, so .head is okay
+                        val isSmaller = lessThan(n1, clique.head)
 
-                      isSmaller && clique.forall(neighborToN1)
-                    }
-                    .map(n1 +: _)
-                }
-              } { _.flatten }
+                        isSmaller && clique.forall(neighborToN1)
+                      }
+                      .map(n1 :: _)
+                  }
+                } { _.flatten }
+              }
             }
         }
 
       loop(size)
   }
 
-  def sync[@specialized(Int) A](
+  /**
+   * By using Lists as the clique type we can share
+   * the memory for all the smaller internal cliques
+   * which can be a significant memory savings
+   */
+  def sync[A](
     size: Int,
     initNode: A,
     incNode: A => A,
