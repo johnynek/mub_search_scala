@@ -54,7 +54,9 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     val nodes = Cliques.allNodes(0, next, last)
 
-    val cliqres2 = timeit(s"sync $size $maxNodes")(Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }, (i, j) => i < j).toList)
+    val cliqres2 = timeit(s"sync $size $maxNodes") {
+      Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }).toList.flatMap(_.cliques.toList)
+    }
 
     val cliq = timeit(s"findAllFuture $size $maxNodes") {
       val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, identity[List[Int]])
@@ -79,14 +81,18 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     val nodes = Cliques.allNodes(0, next, last)
 
     val cliqres = Cliques.findAllFuture(size, 0, next, last, () => { n1: Int => nfn(n1, _) }, identity[List[Int]])
-    val cliqres2 = Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }, (i, j) => i < j)
+    val cliqres2 =
+      Cliques
+        .sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) })
+        .toList
+        .flatMap(_.cliques.toList)
 
     val naive = naiveCliques(size, nodes, nfn).toList
 
     val cliq = Await.result(cliqres.map(_.toList), Inf)
 
     val res = (cliq == naive)
-    val res2 = (cliqres2.toList == naive)
+    val res2 = (cliqres2 == naive)
 
     if (!(res && res2)) {
       if (!res) println(s"$cliq\n\n!=\n\n$naive")

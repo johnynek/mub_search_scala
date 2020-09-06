@@ -1,9 +1,41 @@
 package org.bykn.mubs
 
+import cats.data.NonEmptyList
 import scala.reflect.ClassTag
 import scala.concurrent.{ExecutionContext, Future}
 
 object Cliques {
+  /**
+   * Represents a test of cliques all of which
+   * begin with the same item
+   */
+  sealed abstract class Family[+A] {
+    def cliques: NonEmptyList[List[A]]
+    def cliqueSize: Int
+    // return the same cliqueSize family
+    // such that all items have true
+    def filter(fn: A => Boolean): Option[Family[A]]
+  }
+  object Family {
+    final case object Empty extends Family[Nothing] {
+      def cliques = NonEmptyList(Nil, Nil)
+      def cliqueSize: Int = 0
+      def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
+    }
+    // invariants:
+    // 1. all items in tails have the same cliqueSize
+    // 2. head < all heads in tails
+    final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
+      def cliques = tails.flatMap { tail => tail.cliques.map(head :: _) }
+      def cliqueSize: Int = tails.head.cliqueSize + 1
+      def filter(fn: A => Boolean): Option[Family[A]] =
+        if (fn(head)) {
+          NonEmptyList.fromList(tails.toList.flatMap(_.filter(fn)))
+            .map(NonEmpty(head, _))
+        }
+        else None
+    }
+  }
 
   final def andN[@specialized(Int) A](n0: A => Boolean, n1: A => Boolean): A => Boolean =
     { n: A => n0(n) && n1(n) }
@@ -153,30 +185,39 @@ object Cliques {
    * the memory for all the smaller internal cliques
    * which can be a significant memory savings
    */
-  def sync[A](
+  def sync[A: Ordering](
     size: Int,
     initNode: A,
     incNode: A => A,
     isLastNode: A => Boolean,
-    nfn: A => A => Boolean,
-    lessThan: (A, A) => Boolean): LazyList[List[A]] = {
+    nfn: A => A => Boolean): LazyList[Family[A]] = {
       def all = allNodes(initNode, incNode, isLastNode)
-      def loop(size: Int): LazyList[List[A]] =
-        if (size <= 0) LazyList(Nil)
-        else if (size == 1) all.map(_ :: Nil)
+      def loop(size: Int): LazyList[Family[A]] =
+        if (size <= 1) {
+          if (size < 0) LazyList.empty
+          else if (size == 0) LazyList(Family.Empty)
+          else {
+            val empty = NonEmptyList(Family.Empty, Nil)
+            all.map { n => Family.NonEmpty(n, empty) }
+          }
+        }
         else {
+          val ord = implicitly[Ordering[A]]
           val smaller = loop(size - 1)
           // now we see which of these we can add a single node to:
           all.flatMap { n1 =>
             val neighborToN1 = nfn(n1)
-            smaller
-              .filter { clique =>
-                // we know that clique is not empty because size >= 2
-                val isSmaller = lessThan(n1, clique.head)
+            val n1Children =
+              smaller
+                .flatMap {
+                  case f@Family.NonEmpty(h, rest) if ord.lt(n1, h) && neighborToN1(h) =>
+                    f.filter(neighborToN1)
+                  case _ =>
+                    None
+                }
 
-                isSmaller && clique.forall(neighborToN1)
-              }
-              .map(n1 :: _)
+            NonEmptyList.fromList(n1Children.toList)
+              .map(Family.NonEmpty(n1, _))
           }
         }
 
