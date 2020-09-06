@@ -273,5 +273,10 @@ object Cyclotomic {
   type N6 = Succ[N5]
   type C6 = Root[N6, C5]
   type L6 = Root[N6, L5]
+
+  // 2^7 = 128th roots
+  type N7 = Succ[N6]
+  type C7 = Root[N7, C6]
+  type L7 = Root[N7, L6]
 }
 

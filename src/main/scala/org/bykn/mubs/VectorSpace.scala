@@ -595,7 +595,7 @@ object SearchApp extends CommandApp(
     val depth = Opts.option[Int]("depth", "we use 2^depth roots of unity")
       .mapValidated { d =>
 
-        if ((0 <= d) && (d <= 6)) Validated.valid {
+        if ((0 <= d) && (d <= 7)) Validated.valid {
           d match {
             case 0 => { (d: Int, bits: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d, bits) }
             case 1 => { (d: Int, bits: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d, bits) }
@@ -604,6 +604,7 @@ object SearchApp extends CommandApp(
             case 4 => { (d: Int, bits: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d, bits) }
             case 5 => { (d: Int, bits: Int) => new Space[Cyclotomic.N5, Cyclotomic.L5](d, bits) }
             case 6 => { (d: Int, bits: Int) => new Space[Cyclotomic.N6, Cyclotomic.L6](d, bits) }
+            case 7 => { (d: Int, bits: Int) => new Space[Cyclotomic.N7, Cyclotomic.L7](d, bits) }
           }
         }
         else Validated.invalidNel(s"invalid depth: $d")
