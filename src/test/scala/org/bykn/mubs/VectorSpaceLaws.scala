@@ -6,6 +6,11 @@ import spire.math.{Complex, Real}
 import org.scalacheck.Gen
 
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
+  override def scalaCheckTestParameters =
+    super.scalaCheckTestParameters
+      .withMinSuccessfulTests(500)
+      .withMaxDiscardRatio(10)
+
   val dim = 6
 
   val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim, 20)
@@ -297,9 +302,9 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
      *
      * |2Re(b* c) <= 2|b||c|
      *
-     * TODO: this bound seems very weak numerically, which is weakening things
-     * if we can tighten this bound, there are fewer edges in the graph, and the clique
-     * search may be considerably faster.
+     * to bound |c| use cauchy-schwarz:
+     * |c|^2 <= (\sum_i |exp(2 pi (v(i) - u(i)/n))|^2)(\sum_i |(exp(2 pi (dv(i) - du(i)) / n) - 1)|^2)
+     *        = d * 4 * d * sin^2(pi / n) if n > 1, else 4d^2
      */
     case class Example(v1: List[Complex[Real]], v2: List[Complex[Real]], nth: Int) {
       require(v1.length == v2.length)
