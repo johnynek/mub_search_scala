@@ -285,7 +285,22 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   }
 
   property("if we quantize to nearest root of unity, the inner product error is <= 2|<u, v>| eps + eps^2 with eps = 2d sin(pi/n)") {
-
+    /*
+     * Proof:
+     * a = <u, v> = sum_i exp(2 pi (v(i) - u(i))/n)
+     * b = <u', v'> = sum_i exp(2 pi (v(i) - u(i)/n)) exp(2 pi (dv(i) - du(i)) / n)
+     *              = <u, v> + sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
+     * c = sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
+     * a = b + c
+     * |a|^2 = |b|^2 + 2Re(b* c) + |c|^2
+     * ||a|^2 - |b|^2| <= |2Re(b* c) + |c|^2|
+     *
+     * |2Re(b* c) <= 2|b||c|
+     *
+     * TODO: this bound seems very weak numerically, which is weakening things
+     * if we can tighten this bound, there are fewer edges in the graph, and the clique
+     * search may be considerably faster.
+     */
     case class Example(v1: List[Complex[Real]], v2: List[Complex[Real]], nth: Int) {
       require(v1.length == v2.length)
       require(nth >= 1)
