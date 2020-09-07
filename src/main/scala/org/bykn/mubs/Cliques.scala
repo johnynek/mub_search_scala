@@ -12,6 +12,7 @@ object Cliques {
   sealed abstract class Family[+A] {
     def cliques: LazyList[List[A]]
     def cliqueSize: Int
+    def cliqueCount: Long
     // return the same cliqueSize family
     // such that all items have true
     def filter(fn: A => Boolean): Option[Family[A]]
@@ -20,6 +21,7 @@ object Cliques {
     final case object Empty extends Family[Nothing] {
       def cliques = LazyList(Nil)
       def cliqueSize: Int = 0
+      def cliqueCount: Long = 1L
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
     }
     // invariants:
@@ -28,6 +30,9 @@ object Cliques {
     final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
       def cliques = tails.toList.to(LazyList).flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
+      def cliqueCount: Long =
+        tails.foldLeft(0L)(_ + _.cliqueCount)
+
       def filter(fn: A => Boolean): Option[Family[A]] =
         if (fn(head)) {
           NonEmptyList.fromList(tails.toList.flatMap(_.filter(fn)))

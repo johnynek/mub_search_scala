@@ -660,12 +660,11 @@ object SearchApp extends CommandApp(
             val f1 = if (bases) {
               space.allBasesFuture().flatMap { bases0 =>
                 Future {
-                  val bases: LazyList[List[Int]] =
-                    bases0.to(LazyList).flatMap(_.cliques)
+                  val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
 
-                  println(s"there are ${bases.length} bases")
+                  println(s"there are ${basesLen} bases")
                   mubsOpt.foreach { mub =>
-                    val sl = SafeLong(bases.length)
+                    val sl = SafeLong(basesLen)
                     val comb = sl.pow(mub)
                     println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
                   }
@@ -677,10 +676,9 @@ object SearchApp extends CommandApp(
               case Some(cliqueSize) =>
                 space.allMubVectorsFuture(cliqueSize).flatMap { bases0 =>
                   Future {
-                    val bases: LazyList[List[Int]] =
-                      bases0.to(LazyList).flatMap(_.cliques)
+                    val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
 
-                    println(s"there are ${bases.length} sets of mutually unbiased vectors of clique size = $cliqueSize")
+                    println(s"there are ${basesLen} sets of mutually unbiased vectors of clique size = $cliqueSize")
                   }
                 }
               case None =>
