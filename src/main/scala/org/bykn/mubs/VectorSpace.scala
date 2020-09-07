@@ -9,7 +9,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
 import shapeless.ops.nat.ToInt
 import shapeless.{Nat}
-import spire.math.{SafeLong, Real}
+import spire.math.{SafeLong, Algebraic}
 
 /**
  * We say a pair of vectors, of dimension d
@@ -43,8 +43,7 @@ import spire.math.{SafeLong, Real}
  */
 object VectorSpace {
 
-  // realBits is how many real bits to compute
-  class Space[N <: Nat, C: ClassTag](val dim: Int, realBits: Int)(implicit val C: Cyclotomic[N, C]) {
+  class Space[N <: Nat, C: ClassTag](val dim: Int)(implicit val C: Cyclotomic[N, C]) {
 
     // the total possible set of hadamard vectors is
     // (2^N)^d
@@ -64,28 +63,28 @@ object VectorSpace {
     require(vectorCount/nroots <= SafeLong(Int.MaxValue), s"we can't fit ${vectorCount/nroots} into an Int")
     val standardCount: Int = (vectorCount / nroots).toInt
 
-    val realD: Real = Real(dim)
+    val realD: Algebraic = Algebraic(dim)
 
     /**
      * This is 2d * sin(pi/n) when n>1, else 2d
      */
-    val eps: Real = {
+    val eps: Algebraic = {
       // theta = 2 pi / n
       // C.omega = e^(2 pi i / n)
       // C.omega ^(1/2) = e^(pi i /n)
       // sin(theta/2) = ((1 - cos(theta))/2).sqrt
       // 2d sin(theta/2) = 2d((1 - re(C.omega))/2).sqrt
 
-      val twoD = Real(2 * dim)
+      val twoD = Algebraic(2 * dim)
 
       if (nroots == 1) twoD
       else {
-        twoD * (((Real.one - C.reOmega)/Real.two).sqrt)
+        twoD * (((Algebraic.One - C.reOmega)/Algebraic(2)).sqrt)
       }
     }
 
     override def toString: String = {
-      s"Space(dim = $dim, roots = ${nroots} realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+      s"Space(dim = $dim, roots = ${nroots} eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
     }
 
     def zeroVec(): Array[Int] = new Array[Int](dim)
@@ -137,7 +136,7 @@ object VectorSpace {
       false
     }
 
-    def trace(v: Array[Int]): Real = {
+    def trace(v: Array[Int]): Algebraic = {
       var idx = 0
       var acc = C.zero
       while (idx < v.length) {
@@ -178,7 +177,7 @@ object VectorSpace {
     }
 
     // we do the conjugate on the left
-    def dotAbs2(v1: Array[Int], v2: Array[Int]): Real = {
+    def dotAbs2(v1: Array[Int], v2: Array[Int]): Algebraic = {
       require(v1.length == v2.length)
       var idx = 0
       var acc = C.zero
@@ -207,13 +206,10 @@ object VectorSpace {
      * for orthogonal vectors, that reduces
      * to eps^2
      */
-    def isOrth(r: Real): Boolean = {
-      val diff = r - orthEps
-      // this is the closest rational x such that r = x/2^p
-      diff(realBits).signum <= 0
-    }
+    def isOrth(r: Algebraic): Boolean =
+      (r - orthEps).signum <= 0
 
-    val ubEps = eps * (Real.two * realD.sqrt + eps)
+    val ubEps = eps * (Algebraic(2) * realD.sqrt + eps)
 
     // we know |a|^2 <= d^2
     // so, ||a|^2 - d| <= d^2 - d
@@ -230,10 +226,9 @@ object VectorSpace {
      * for unbiased vectors, that reduces
      * to eps * (2 d.sqrt +  eps)
      */
-    def isUnbiased(r: Real): Boolean = {
+    def isUnbiased(r: Algebraic): Boolean = {
       val diff = (r - realD).abs - ubEps
-      // this is the closest rational x such that r = x/2^p
-      diff(realBits).signum <= 0
+      diff.signum <= 0
     }
 
     def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
@@ -312,7 +307,7 @@ object VectorSpace {
       count
     }
 
-    def buildCacheFuture(fn: Real => Boolean)(implicit ec: ExecutionContext): Future[BitSet] = {
+    def buildCacheFuture(fn: Algebraic => Boolean)(implicit ec: ExecutionContext): Future[BitSet] = {
       // first we compute all the traces that are orthogonal
       // the java bitset doesn't box on access
       val bitset = new BitSet(standardCount)
@@ -332,7 +327,7 @@ object VectorSpace {
       fut.map(_ => bitset)
     }
 
-    def buildCache(fn: Real => Boolean): BitSet =
+    def buildCache(fn: Algebraic => Boolean): BitSet =
       Await.result(buildCacheFuture(fn)(ExecutionContext.global), Inf)
 
     // this builds standardized bases:
@@ -569,7 +564,6 @@ object SearchApp extends CommandApp(
 
     import cats.implicits._
 
-    val realBits = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)
     val dim = Opts.option[Int]("dim", "the dimension we are working in, should be small!").mapValidated { d =>
       if (d < 2) Validated.invalidNel(s"invalid dimension: $d, should be >= 2")
       else Validated.valid(d)
@@ -599,24 +593,20 @@ object SearchApp extends CommandApp(
 
         if ((0 <= d) && (d <= 7)) Validated.valid {
           d match {
-            case 0 => { (d: Int, bits: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d, bits) }
-            case 1 => { (d: Int, bits: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d, bits) }
-            case 2 => { (d: Int, bits: Int) => new Space[Cyclotomic.N2, Cyclotomic.L2](d, bits) }
-            case 3 => { (d: Int, bits: Int) => new Space[Cyclotomic.N3, Cyclotomic.L3](d, bits) }
-            case 4 => { (d: Int, bits: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d, bits) }
-            case 5 => { (d: Int, bits: Int) => new Space[Cyclotomic.N5, Cyclotomic.L5](d, bits) }
-            case 6 => { (d: Int, bits: Int) => new Space[Cyclotomic.N6, Cyclotomic.L6](d, bits) }
-            case 7 => { (d: Int, bits: Int) => new Space[Cyclotomic.N7, Cyclotomic.L7](d, bits) }
+            case 0 => { (d: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d) }
+            case 1 => { (d: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d) }
+            case 2 => { (d: Int) => new Space[Cyclotomic.N2, Cyclotomic.L2](d) }
+            case 3 => { (d: Int) => new Space[Cyclotomic.N3, Cyclotomic.L3](d) }
+            case 4 => { (d: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d) }
+            case 5 => { (d: Int) => new Space[Cyclotomic.N5, Cyclotomic.L5](d) }
+            case 6 => { (d: Int) => new Space[Cyclotomic.N6, Cyclotomic.L6](d) }
+            case 7 => { (d: Int) => new Space[Cyclotomic.N7, Cyclotomic.L7](d) }
           }
         }
         else Validated.invalidNel(s"invalid depth: $d")
       }
 
-    val spaceOpt =
-      realBits
-        .product(dim)
-        .product(depth)
-        .map { case ((b, d), fn) => fn(d, b) }
+    val spaceOpt = depth.ap(dim)
 
     val search =
       (spaceOpt, goalMubs, threads)

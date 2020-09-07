@@ -8,7 +8,7 @@ import org.scalacheck.Gen
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
   val dim = 6
 
-  val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim, 20)
+  val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim)
 
   val genInt: Gen[Int] =
     Gen.choose(0, space.standardCount - 1)
@@ -134,7 +134,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   /**
    * Some tests with smaller spaces that we can afford to examine
    */
-  val space2 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](2, 20)
+  val space2 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](2)
 
   test("allMubVectors are all unbiased to each other and 0") {
     val ubBitSet = space2.buildCache(space2.isUnbiased)
@@ -256,11 +256,11 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   }
 
   test("Space detects standard d=3 mubs with n=32") {
-    val space5 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](3, 20)
+    val space5 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](3)
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
       VectorSpace.allDistinctPairs(basis)
         .forall { case (v1, v2) =>
-          space5.isOrth(dot2(v1, v2))
+          space5.isOrth(Real.algebra.toAlgebraic(dot2(v1, v2)))
         }
 
     def areApproxUnbiased(basis1: List[List[Complex[Real]]], basis2: List[List[Complex[Real]]]): Boolean = {
@@ -268,7 +268,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       basis1.forall { v1 =>
         basis2.forall { v2 =>
-          space5.isUnbiased(dot2(v1, v2))
+          space5.isUnbiased(Real.algebra.toAlgebraic(dot2(v1, v2)))
         }
       }
     }
@@ -285,7 +285,22 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   }
 
   property("if we quantize to nearest root of unity, the inner product error is <= 2|<u, v>| eps + eps^2 with eps = 2d sin(pi/n)") {
-
+    /*
+     * Proof:
+     * a = <u, v> = sum_i exp(2 pi (v(i) - u(i))/n)
+     * b = <u', v'> = sum_i exp(2 pi (v(i) - u(i)/n)) exp(2 pi (dv(i) - du(i)) / n)
+     *              = <u, v> + sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
+     * c = sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
+     * a = b + c
+     * |a|^2 = |b|^2 + 2Re(b* c) + |c|^2
+     * ||a|^2 - |b|^2| <= |2Re(b* c) + |c|^2|
+     *
+     * |2Re(b* c) <= 2|b||c|
+     *
+     * TODO: this bound seems very weak numerically, which is weakening things
+     * if we can tighten this bound, there are fewer edges in the graph, and the clique
+     * search may be considerably faster.
+     */
     case class Example(v1: List[Complex[Real]], v2: List[Complex[Real]], nth: Int) {
       require(v1.length == v2.length)
       require(nth >= 1)

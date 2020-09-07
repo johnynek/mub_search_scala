@@ -3,7 +3,7 @@ package org.bykn.mubs
 import algebra.ring.CommutativeRing
 import shapeless.{Nat, Succ}
 import shapeless.ops.nat.ToInt
-import spire.math.{Complex, Natural, Real, Rational, SafeLong}
+import spire.math.{Algebraic, Complex, Rational, SafeLong}
 
 /**
  * represents values in field adjoining rationals with the 2^N-th primitive
@@ -11,21 +11,23 @@ import spire.math.{Complex, Natural, Real, Rational, SafeLong}
  *
  * See: https://encyclopediaofmath.org/wiki/Cyclotomic_field
  *
+ * This construction allows us to only use Algebraic numbers, for which
+ * there is exists an exact algorithm to do comparisons.
  */
 sealed abstract class Cyclotomic[N <: Nat, C] extends CommutativeRing[C] {
   // this is |x|^2 of the current number
-  def abs2(c: C): Real
-  def re(c: C): Real
-  def im(c: C): Real
+  def abs2(c: C): Algebraic
+  def re(c: C): Algebraic
+  def im(c: C): Algebraic
 
   def one: C
   def zero: C
   // the principle root of unity at this level
   def omega: C
   // this is Re(omega)
-  def reOmega: Real
+  def reOmega: Algebraic
   // this is Im(omega)
-  def imOmega: Real
+  def imOmega: Algebraic
 
   def root: N
 
@@ -33,7 +35,7 @@ sealed abstract class Cyclotomic[N <: Nat, C] extends CommutativeRing[C] {
   // starting with 1, omega, omega^2, ...
   def roots: Vector[C]
 
-  def toComplex(c: C): Complex[Real] =
+  def toComplex(c: C): Complex[Algebraic] =
     Complex(re(c), im(c))
 }
 
@@ -52,17 +54,17 @@ object Cyclotomic {
 
       def negate(r: Rational): Rational = -r
       // this is |x|^2 of the current number
-      def abs2(c: Rational): Real = Real.Exact(c * c)
-      def re(c: Rational): Real = Real.Exact(c)
-      def im(c: Rational): Real = Real.zero
+      def abs2(c: Rational): Algebraic = Algebraic(c * c)
+      def re(c: Rational) = Algebraic(c)
+      def im(c: Rational) = Algebraic.Zero
 
       def one = Rational.one
       def zero = Rational.zero
       // omega to the 2^(root) power == one
       // omega to the (2^root - 1) power != one
       def omega = Rational.one
-      def reOmega = Rational.one
-      def imOmega = Rational.zero
+      def reOmega = Algebraic.One
+      def imOmega = Algebraic.Zero
 
       def root: Nat._0 = Nat._0
 
@@ -80,16 +82,16 @@ object Cyclotomic {
 
       def negate(r: Rational): Rational = -r
       // this is |x|^2 of the current number
-      def abs2(c: Rational): Real = Real.Exact(c * c)
-      def re(c: Rational): Real = Real.Exact(c)
-      def im(c: Rational): Real = Real.zero
+      def abs2(c: Rational) = Algebraic(c * c)
+      def re(c: Rational): Algebraic = Algebraic(c)
+      def im(c: Rational): Algebraic = Algebraic.Zero
 
       def one = Rational.one
       def zero = Rational.zero
       // omega to the 2^root power == one
       def omega = -Rational.one
-      val reOmega = -Real.one
-      val imOmega = Real.zero
+      val reOmega = -Algebraic.One
+      val imOmega = Algebraic.Zero
 
       val root: Nat._1 = Succ()
       val roots: Vector[Rational] = Vector(one, omega)
@@ -106,16 +108,16 @@ object Cyclotomic {
 
       def negate(r: SafeLong): SafeLong = -r
       // this is |x|^2 of the current number
-      def abs2(c: SafeLong): Real = Real.Exact(c * c)
-      def re(c: SafeLong): Real = Real.Exact(c)
-      def im(c: SafeLong): Real = Real.zero
+      def abs2(c: SafeLong): Algebraic = Algebraic(c * c)
+      def re(c: SafeLong): Algebraic = Algebraic(c)
+      def im(c: SafeLong): Algebraic = Algebraic.Zero
 
       def one = SafeLong.one
       def zero = SafeLong.zero
       // omega to the 2^root power == one
-      def omega = -SafeLong.one
-      val reOmega = -Real.one
-      val imOmega = Real.zero
+      val omega = -SafeLong.one
+      val reOmega = -Algebraic.One
+      def imOmega = Algebraic.Zero
 
       val root: Nat._1 = Succ()
       val roots: Vector[SafeLong] = Vector(one, omega)
@@ -161,12 +163,12 @@ object Cyclotomic {
 
       // re(a + sqrt(w) * b) =
       // re(a) + re(sqrt(w)) * re(b) - im(sqrt(w)) * im(b)
-      def re(c: Root[Succ[N], C]): Real =
+      def re(c: Root[Succ[N], C]): Algebraic =
         C.re(c.alpha) + reOmega * C.re(c.beta) - (imOmega * C.im(c.beta))
 
       // im(a + sqrt(w) * b) =
       // im(a) + im(sqrt(w)) * re(b) + re(sqrt(w)) * im(b)
-      def im(c: Root[Succ[N], C]): Real =
+      def im(c: Root[Succ[N], C]): Algebraic =
         C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
 
       //
@@ -184,7 +186,7 @@ object Cyclotomic {
       //   im(a)re(sw)im(b) +
       //   im(a)im(sw)re(b) +
       // +i im(a)im(sw)im(b))
-      def abs2(c: Root[Succ[N], C]): Real =
+      def abs2(c: Root[Succ[N], C]): Algebraic =
         if (c.alpha == C.zero) {
           C.abs2(c.beta)
         }
@@ -220,12 +222,12 @@ object Cyclotomic {
       /**
        * cos(theta) = cos(C.theta/2) = sqrt((1 + cos(C.theta))/2)
        */
-      val reOmega: Real = ((Real.one + C.reOmega) / Real.two).sqrt
+      val reOmega: Algebraic = ((Algebraic.One + C.reOmega) / Algebraic(2)).sqrt
 
       /**
        * sin(theta) = sin(C.theta/2) = sqrt((1 - cos(C.theta))/2)
        */
-      val imOmega: Real = ((Real.one - C.reOmega) / Real.two).sqrt
+      val imOmega: Algebraic = ((Algebraic.One - C.reOmega) / Algebraic(2)).sqrt
 
       val root: Succ[N] = Succ()
 
