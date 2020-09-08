@@ -2,8 +2,11 @@ package org.bykn.mubs
 
 import cats.Eval
 import com.monovore.decline.CommandApp
+import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
 import java.util.concurrent.Executors
 import java.util.BitSet
+import java.util.zip.{GZIPInputStream, GZIPOutputStream}
+import java.nio.file.Path
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
@@ -313,14 +316,16 @@ object VectorSpace {
     }
 
     // all permutations then convert back to int
-    private def perms(buffer: Array[Int], v0: Int): Iterator[Int] = {
+    def perms(buffer: Array[Int], v0: Int): Iterator[Int] = {
       def loop(pos: Int): Iterator[Int] =
         // we always leave the last digit to be 0
-        if (pos >= (buffer.length - 1)) Iterator.single(v0)
+        // so we can't swap the second to last position
+        // with anything
+        if (pos >= (buffer.length - 2)) Iterator.single(v0)
         else {
           // we can swap this position with any
           // position to the right
-          (pos until buffer.length)
+          (pos until (buffer.length - 1))
             .iterator
             .flatMap { swapIdx =>
               val inners = loop(pos + 1)
@@ -365,6 +370,7 @@ object VectorSpace {
                 if (bitIsSet) {
                   bitset.synchronized {
                     perms(tmp, v1).foreach { v =>
+                      require(v < standardCount, s"error: $v >= $standardCount")
                       bitset.set(v)
                     }
                   }
@@ -412,12 +418,13 @@ object VectorSpace {
 
     def nextFn(set: BitSet): Int => Int =
       { (i: Int) =>
-        var res = i + 1
-        var cont = true
-        while (!(set.get(res) || (standardCount <= res))) {
-          res = res + 1
+        val res = i + 1
+        if (res < standardCount) {
+          val n = set.nextSetBit(res)
+          if (n < 0) standardCount
+          else n
         }
-        res
+        else res
       }
 
     /**
@@ -675,6 +682,64 @@ object VectorSpace {
     f1.zip(f2).map(_ => ())
   }
 
+  def writeTable[N <: Nat, C](
+    space: Space[N, C],
+    isOrthTable: Boolean,
+    dos: DataOutputStream)(implicit ec: ExecutionContext): Future[Unit] = {
+    val fn = if (isOrthTable) space.isOrth(_) else space.isUnbiased(_)
+
+    space.buildCacheFuture(fn)
+      .flatMap { bitset =>
+        val sc = space.standardCount
+        dos.writeInt(space.dim)
+        dos.writeInt(sc)
+        dos.writeBoolean(isOrthTable)
+        dos.writeInt(bitset.cardinality)
+        // we use a delta encoding, which will
+        // compress better if we compress larger tables
+        Future {
+          var prev = 0
+          var idx = bitset.nextSetBit(0)
+          while ((idx < sc) && (idx >= 0)) {
+            dos.writeInt(idx - prev)
+            prev = idx
+            idx = bitset.nextSetBit(idx + 1)
+          }
+
+          dos.flush()
+        }
+      }
+  }
+
+  def readTable[N <: Nat, C](
+    space: Space[N, C],
+    isOrthTable: Boolean,
+    ios: DataInputStream): BitSet = {
+    val fileDim = ios.readInt()
+    val fileSc = ios.readInt()
+    val fileIsOrth = ios.readBoolean()
+    val card = ios.readInt()
+
+    if ((fileDim != space.dim) || (fileSc != space.standardCount) || (isOrthTable != fileIsOrth) || (card < 0)) {
+      throw new IllegalArgumentException(
+        s"expected (dim = ${space.dim}, standardCount = ${space.standardCount}, isOrth = $isOrthTable, card >= 0)\n\n" +
+        s"but found (dim = $fileDim, standardCount = $fileSc, isOrth = $fileIsOrth, card = $card)")
+    }
+
+    // past here we know things match
+    val bitset = new BitSet(fileSc)
+    var idx = 0
+    var prev = 0
+    while (idx < card) {
+      val next = ios.readInt()
+      prev += next
+      bitset.set(prev)
+      idx = idx + 1
+    }
+
+    bitset
+  }
+
   def search[N <: Nat, C](
     space: Space[N, C],
     mubs: Int)(implicit ec: ExecutionContext): Future[Unit] = {
@@ -789,9 +854,30 @@ object SearchApp extends CommandApp(
           }
         }
 
+    val writeTable =
+      (spaceOpt,
+        threads,
+        Opts.flag("orth", "build the orthTable").as(true)
+          .orElse(Opts.flag("unbiased", "build the unbiasedness table").as(false)),
+        Opts.option[Path]("output", "file to write to"))
+        .mapN { (space, cont, isOrth, path) =>
+          cont { implicit ec =>
+            val output = new FileOutputStream(path.toFile)
+            val gz = new GZIPOutputStream(output)
+            val data = new DataOutputStream(gz)
+            val fut = VectorSpace.writeTable(space, isOrth, data)
+            try Await.result(fut, Inf)
+            finally {
+              data.close()
+            }
+          }
+        }
+
     Opts.subcommand("search", "run a search for mubs")(search)
       .orElse(
         Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
+      .orElse(
+        Opts.subcommand("write_table", "compute an orthogonality/unbiasedness table and write to file")(writeTable))
   }
 
 )

@@ -1,14 +1,16 @@
 package org.bykn.mubs
 
 import algebra.ring.Ring
-import org.scalacheck.Prop.forAll
-import spire.math.{Complex, Real}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import org.scalacheck.Gen
+import org.scalacheck.Prop.forAll
+import shapeless.Nat
+import spire.math.{Complex, Real}
 
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
   override def scalaCheckTestParameters =
     super.scalaCheckTestParameters
-      .withMinSuccessfulTests(500)
+      .withMinSuccessfulTests(50)
       .withMaxDiscardRatio(10)
 
   val dim = 6
@@ -260,6 +262,37 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       }
   }
 
+  property("perms doesn't emit non-standard vectors, and they sort the same") {
+    val ary = new Array[Int](space.dim)
+    val ary1 = new Array[Int](space.dim)
+    forAll(Gen.choose(0, space.standardCount)) { i =>
+      space.intToVector(i, ary1)
+      java.util.Arrays.sort(ary1, 0, dim - 1)
+      val normI = space.vectorToInt(ary1)
+
+      if (normI == i) {
+        val ps = space.perms(ary, i).toList
+        @annotation.tailrec
+        def fac(l: Int, acc: Int = 1): Int =
+          if (l <= 1) acc
+          else fac(l - 1, l * acc)
+
+        assert(ps.length == fac(space.dim - 1), s"${ps.length} != ${fac(space.dim - 1)}")
+
+        ps
+          .foreach { idx =>
+            assert(0 <= idx)
+            assert(idx < space.standardCount)
+
+            space.intToVector(idx, ary1)
+            java.util.Arrays.sort(ary1, 0, dim - 1)
+            val res = space.vectorToInt(ary1)
+            assert(res == i, s"$res != $i, idx = $idx, ${ary1.toList}")
+          }
+      }
+    }
+  }
+
   test("Space detects standard d=3 mubs with n=32") {
     val space5 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](3, 20)
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
@@ -365,5 +398,32 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       ex.law
     }
+  }
+
+  test("we can round-trip tables") {
+    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+
+    def law[N <: Nat, C](space: VectorSpace.Space[N, C], isOrth: Boolean) = {
+      val baos = new ByteArrayOutputStream()
+      val output = new DataOutputStream(baos)
+
+      VectorSpace.writeTable(space, isOrth, output)
+        .map { _ =>
+
+          val input = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()))
+          val fileBitSet = VectorSpace.readTable(space, isOrth, input)
+
+          val fn = if (isOrth) space.isOrth(_) else space.isUnbiased(_)
+          assert(fileBitSet == space.buildCache(fn))
+        }
+    }
+
+    // space has a vector size of 8^5 = 2^20
+    for {
+      _ <- law(space, true)
+      _ <- law(space, false)
+      _ <- law(space2, true)
+      _ <- law(space2, false)
+    } yield ()
   }
 }
