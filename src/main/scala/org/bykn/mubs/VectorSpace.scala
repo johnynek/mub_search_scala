@@ -623,6 +623,87 @@ object VectorSpace {
 
     loop(items, Nil)
   }
+
+  final def runInfo[N <: Nat, C](
+    space: Space[N, C],
+    bases: Boolean,
+    runSync: Boolean,
+    mubsOpt: Option[Int]
+    )(implicit ec: ExecutionContext): Future[Unit] = {
+
+    println(s"# $space")
+    val f1 = if (bases) {
+      def showBases(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
+        Future {
+          val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
+
+          println(s"there are ${basesLen} bases")
+          mubsOpt.foreach { mub =>
+            val sl = SafeLong(basesLen)
+            val comb = sl.pow(mub)
+            println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
+          }
+        }
+
+      if (runSync) showBases(space.allBasesSync)
+      else space.allBasesFuture().flatMap(showBases)
+    } else Future.unit
+
+    val f2 = mubsOpt match {
+      case Some(cliqueSize) =>
+        def showMub(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
+          Future {
+            println("showMub...")
+            if (bases0.isEmpty) {
+              println(s"there are 0 sets of mutually unbiased vectors of clique size = $cliqueSize")
+            }
+            else {
+              println(s"nonEmpty... computing.")
+              val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
+
+              println(s"there are ${basesLen} sets of mutually unbiased vectors of clique size = $cliqueSize")
+            }
+          }
+
+
+        if (runSync) showMub(space.allMubVectorsSync(cliqueSize))
+        else space.allMubVectorsFuture(cliqueSize).flatMap(showMub)
+      case None =>
+        Future.unit
+    }
+
+    f1.zip(f2).map(_ => ())
+  }
+
+  def search[N <: Nat, C](
+    space: Space[N, C],
+    mubs: Int)(implicit ec: ExecutionContext): Future[Unit] = {
+
+    println(s"# $space")
+    space.allMubsFuture(mubs)
+      .flatMap { mubsVector =>
+        println(s"# found: ${mubsVector.length}")
+
+        Future {
+          var idx = 0
+          val ary = new Array[Int](space.dim)
+
+          mubsVector.foreach { clique =>
+            def showBasis(v: List[List[Int]]): String = {
+              def showInt(i: Int): String = {
+                space.intToVector(i, ary)
+                ary.mkString("[", ", ", "]")
+              }
+              v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
+            }
+
+            val cliqueStr = showBasis(clique)
+            println(s"$idx: $cliqueStr")
+            idx = idx + 1
+          }
+        }
+      }
+  }
 }
 
 object SearchApp extends CommandApp(
@@ -691,26 +772,7 @@ object SearchApp extends CommandApp(
           val mubs = mubsOpt.getOrElse(space.dim)
 
           cont { implicit ec =>
-            println(s"# $space")
-            val mubsVector =
-              Await.result(space.allMubsFuture(mubs), Inf)
-            println(s"# found: ${mubsVector.length}")
-            var idx = 0
-            val ary = new Array[Int](space.dim)
-
-            mubsVector.foreach { clique =>
-              def showBasis(v: List[List[Int]]): String = {
-                def showInt(i: Int): String = {
-                  space.intToVector(i, ary)
-                  ary.mkString("[", ", ", "]")
-                }
-                v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
-              }
-
-              val cliqueStr = showBasis(clique)
-              println(s"$idx: $cliqueStr")
-              idx = idx + 1
-            }
+            Await.result(VectorSpace.search(space, mubs), Inf)
           }
         }
 
@@ -723,48 +785,7 @@ object SearchApp extends CommandApp(
         goalMubs)
         .mapN { (space, cont, bases, runSync, mubsOpt) =>
           cont { implicit ec =>
-            println(s"# $space")
-            val f1 = if (bases) {
-              def showBases(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
-                Future {
-                  val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
-
-                  println(s"there are ${basesLen} bases")
-                  mubsOpt.foreach { mub =>
-                    val sl = SafeLong(basesLen)
-                    val comb = sl.pow(mub)
-                    println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
-                  }
-                }
-
-              if (runSync) showBases(space.allBasesSync)
-              else space.allBasesFuture().flatMap(showBases)
-            } else Future.unit
-
-            val f2 = mubsOpt match {
-              case Some(cliqueSize) =>
-                def showMub(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
-                  Future {
-                    println("showMub...")
-                    if (bases0.isEmpty) {
-                      println(s"there are 0 sets of mutually unbiased vectors of clique size = $cliqueSize")
-                    }
-                    else {
-                      println(s"nonEmpty... computing.")
-                      val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
-
-                      println(s"there are ${basesLen} sets of mutually unbiased vectors of clique size = $cliqueSize")
-                    }
-                  }
-
-
-                if (runSync) showMub(space.allMubVectorsSync(cliqueSize))
-                else space.allMubVectorsFuture(cliqueSize).flatMap(showMub)
-              case None =>
-                Future.unit
-            }
-
-            Await.result(f1.zip(f2), Inf)
+            Await.result(VectorSpace.runInfo(space, bases, runSync, mubsOpt), Inf)
           }
         }
 
@@ -772,4 +793,5 @@ object SearchApp extends CommandApp(
       .orElse(
         Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
   }
+
 )

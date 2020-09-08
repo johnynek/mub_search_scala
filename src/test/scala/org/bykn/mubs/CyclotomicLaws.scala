@@ -68,7 +68,7 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
     }
   }
 
-  property(s"C$depth cyclotomic a * w = timesOmega") {
+  property(s"C$depth cyclotomic a * w = timesOmega(a)") {
     forAll { a: C =>
       cyclotomic.times(a, cyclotomic.omega) == cyclotomic.timesOmega(a)
     }
