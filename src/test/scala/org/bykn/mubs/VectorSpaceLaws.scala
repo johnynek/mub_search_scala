@@ -155,7 +155,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
     (1 to 3).foreach { mubSize =>
       space2
-        .allMubVectors(mubSize)
+        .allMubVectors(space2.buildCache(space2.isUnbiased(_)), mubSize)
         .foreach { mubSet =>
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()

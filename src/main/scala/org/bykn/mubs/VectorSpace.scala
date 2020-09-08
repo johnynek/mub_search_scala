@@ -433,25 +433,22 @@ object VectorSpace {
      * and they all include the all 0 vector (which is omitted
      * in the response)
      */
-    def allBasesFuture()(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
+    def allBasesFuture(orthSet: BitSet)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
       //if (orthEpsIsTrivial) throw new IllegalStateException(s"orthEps is trivial: $orthEps >= ${realD.pow(2)}")
 
-      buildCacheFuture(isOrth).flatMap { orthSet =>
-        val fn = buildCachedFn(orthSet)
-        val inc = nextFn(orthSet)
-        // we use an array for the ints because it is more space efficient
-        // than lists
-        Cliques.async[Int](
-          size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
-          initNode = inc(0),
-          incNode = inc,
-          isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
-          fn)
-      }
+      val fn = buildCachedFn(orthSet)
+      val inc = nextFn(orthSet)
+      // we use an array for the ints because it is more space efficient
+      // than lists
+      Cliques.async[Int](
+        size = (dim - 1), // the number of items in a basis is the dimension, in addition to 0
+        initNode = inc(0),
+        incNode = inc,
+        isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
+        fn)
     }
 
-    private def cliqueSync(edgeFn: Real => Boolean, size: Int): LazyList[Cliques.Family[Int]] = {
-      val set = buildCache(edgeFn)
+    private def cliqueSync(set: BitSet, size: Int): LazyList[Cliques.Family[Int]] = {
       val fn = buildCachedFn(set)
       val inc = nextFn(set)
       // we use an array for the ints because it is more space efficient
@@ -464,11 +461,11 @@ object VectorSpace {
         fn())
     }
 
-    def allBasesSync: LazyList[Cliques.Family[Int]] =
-      cliqueSync(isOrth, dim - 1)
+    def allBasesSync(orthSet: BitSet): LazyList[Cliques.Family[Int]] =
+      cliqueSync(orthSet, dim - 1)
 
-    def allBases(): List[Cliques.Family[Int]] =
-      Await.result(allBasesFuture()(ExecutionContext.global), Inf)
+    def allBases(orthSet: BitSet): List[Cliques.Family[Int]] =
+      Await.result(allBasesFuture(orthSet)(ExecutionContext.global), Inf)
 
     /**
      * These are sets of mutually unbiased vectors.
@@ -479,7 +476,7 @@ object VectorSpace {
      * These are *standardized*: they are all unbiased to 0
      * and all have 0 in the final position
      */
-    private def allMubVectorsFutureWithFn(cliqueSize: Int, ubBitSet: BitSet)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
+    def allMubVectorsFuture(ubBitSet: BitSet, cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
       val fn = buildCachedFn(ubBitSet)
       val inc = nextFn(ubBitSet)
       // we use an array for the ints because it is more space efficient
@@ -494,29 +491,11 @@ object VectorSpace {
     }
 
     // if there are cliqueSize, mubs, we are looking for cliqueSize - 1
-    def allMubVectorsSync(cliqueSize: Int): LazyList[Cliques.Family[Int]] =
-      cliqueSync(isUnbiased, cliqueSize - 1)
+    def allMubVectorsSync(ubBitSet: BitSet, cliqueSize: Int): LazyList[Cliques.Family[Int]] =
+      cliqueSync(ubBitSet, cliqueSize - 1)
 
-    /**
-     * These are sets of mutually unbiased vectors.
-     * This is an upper bound on unbiased bases because
-     * selecting a single item from unbiased bases is a
-     * set of unbiased vectors
-     *
-     * These are *standardized*: they are all unbiased to 0
-     * and all have 0 in the final position
-     */
-    def allMubVectorsFuture(cliqueSize: Int)(implicit ec: ExecutionContext): Future[List[Cliques.Family[Int]]] = {
-      //if (ubEpsIsTrivial) throw new IllegalStateException(s"ubEps is trivial: $ubEps > ${(realD.pow(2) - realD)}")
-
-      buildCacheFuture(isUnbiased)
-        .flatMap { ubBitSet =>
-          allMubVectorsFutureWithFn(cliqueSize, ubBitSet)
-        }
-    }
-
-    def allMubVectors(cliqueSize: Int): List[Cliques.Family[Int]] =
-      Await.result(allMubVectorsFuture(cliqueSize)(ExecutionContext.global), Inf)
+    def allMubVectors(ubBitSet: BitSet, cliqueSize: Int): List[Cliques.Family[Int]] =
+      Await.result(allMubVectorsFuture(ubBitSet, cliqueSize)(ExecutionContext.global), Inf)
 
     // transform all but the first with a the corresponding mub
     // we add back the 0 vector to the front in the results
@@ -558,46 +537,42 @@ object VectorSpace {
      * Finally, try to assemble a set of MUBs from these:
      * H0, Z1 H1, Z2 H2, ...
      */
-    def allMubsFuture(cnt: Int)(implicit ec: ExecutionContext): Future[List[List[List[Int]]]] = {
+    def allMubsFuture(orthSet: BitSet, ubBitSet: BitSet, cnt: Int)(implicit ec: ExecutionContext): Future[List[List[List[Int]]]] = {
 
-      buildCacheFuture(isUnbiased)
-        .flatMap { ubBitSet =>
+        val mubs = allMubVectorsFuture(ubBitSet, cnt)
+        // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
+        // to transform them. We have to include the phantom 0 vector
+        def assemble(bases: List[Cliques.Family[Int]], mubV: List[Cliques.Family[Int]]): Future[List[List[List[Int]]]] = {
+          require(bases.forall(_.cliqueSize == dim - 1), "invalid basis size")
+          require(mubV.forall(_.cliqueSize == (cnt - 1)), "invalid mub size")
 
-          val mubs = allMubVectorsFutureWithFn(cnt, ubBitSet)
-          // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
-          // to transform them. We have to include the phantom 0 vector
-          def assemble(bases: List[Cliques.Family[Int]], mubV: List[Cliques.Family[Int]]): Future[List[List[List[Int]]]] = {
-            require(bases.forall(_.cliqueSize == dim - 1), "invalid basis size")
-            require(mubV.forall(_.cliqueSize == (cnt - 1)), "invalid mub size")
-
-            Future.traverse(mubV) { ubv =>
-              Future {
-                // these are all sets of cnt bases
-                // in every possible order
-                //
-                // these are as cheap to compute as iterate so don't keep them
-                // in memory
-                chooseN(cnt, bases.flatMap(_.cliques.toList))
-                  .flatMap { hs =>
-                    ubv
-                      .cliques
-                      .flatMap { mub =>
-                        transformStdBasis(hs, mub, ubBitSet)
-                      }
-                  }
-                  .toList
-              }
+          Future.traverse(mubV) { ubv =>
+            Future {
+              // these are all sets of cnt bases
+              // in every possible order
+              //
+              // these are as cheap to compute as iterate so don't keep them
+              // in memory
+              chooseN(cnt, bases.flatMap(_.cliques.toList))
+                .flatMap { hs =>
+                  ubv
+                    .cliques
+                    .flatMap { mub =>
+                      transformStdBasis(hs, mub, ubBitSet)
+                    }
+                }
+                .toList
             }
-            .map(_.flatten)
           }
-
-          allBasesFuture().zip(mubs)
-            .flatMap { case (bases, mubV) => assemble(bases, mubV) }
+          .map(_.flatten)
         }
-    }
 
-    def allMubs(cnt: Int): List[List[List[Int]]] =
-      Await.result(allMubsFuture(cnt)(ExecutionContext.global), Inf)
+        allBasesFuture(orthSet).zip(mubs)
+          .flatMap { case (bases, mubV) => assemble(bases, mubV) }
+      }
+
+    def allMubs(orthSet: BitSet, ubBitSet: BitSet, cnt: Int): List[List[List[Int]]] =
+      Await.result(allMubsFuture(orthSet, ubBitSet, cnt)(ExecutionContext.global), Inf)
   }
 
   // return lists of exactly n items where each item
@@ -633,31 +608,34 @@ object VectorSpace {
 
   final def runInfo[N <: Nat, C](
     space: Space[N, C],
-    bases: Boolean,
+    bases: Option[BitSet],
     runSync: Boolean,
-    mubsOpt: Option[Int]
+    mubsOpt: Option[(Int, BitSet)]
     )(implicit ec: ExecutionContext): Future[Unit] = {
 
     println(s"# $space")
-    val f1 = if (bases) {
-      def showBases(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
-        Future {
-          val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
+    val f1 = bases match {
+      case Some(orthBitSet) =>
+        def showBases(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
+          Future {
+            val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
 
-          println(s"there are ${basesLen} bases")
-          mubsOpt.foreach { mub =>
-            val sl = SafeLong(basesLen)
-            val comb = sl.pow(mub)
-            println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
+            println(s"there are ${basesLen} bases")
+            mubsOpt.foreach { case (mub, _) =>
+              val sl = SafeLong(basesLen)
+              val comb = sl.pow(mub)
+              println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
+            }
           }
-        }
 
-      if (runSync) showBases(space.allBasesSync)
-      else space.allBasesFuture().flatMap(showBases)
-    } else Future.unit
+        if (runSync) showBases(space.allBasesSync(orthBitSet))
+        else space.allBasesFuture(orthBitSet).flatMap(showBases)
+      case None =>
+        Future.unit
+    }
 
     val f2 = mubsOpt match {
-      case Some(cliqueSize) =>
+      case Some((cliqueSize, ubBitSet)) =>
         def showMub(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
           Future {
             println("showMub...")
@@ -673,8 +651,8 @@ object VectorSpace {
           }
 
 
-        if (runSync) showMub(space.allMubVectorsSync(cliqueSize))
-        else space.allMubVectorsFuture(cliqueSize).flatMap(showMub)
+        if (runSync) showMub(space.allMubVectorsSync(ubBitSet, cliqueSize))
+        else space.allMubVectorsFuture(ubBitSet, cliqueSize).flatMap(showMub)
       case None =>
         Future.unit
     }
@@ -740,12 +718,23 @@ object VectorSpace {
     bitset
   }
 
+  def readPath[N <: Nat, C](space: Space[N, C], isOrth: Boolean, path: Path): BitSet = {
+    val input = new FileInputStream(path.toFile)
+    val gz = new GZIPInputStream(input)
+    val data = new DataInputStream(gz)
+
+    try VectorSpace.readTable(space, isOrth, data)
+    finally data.close()
+  }
+
   def search[N <: Nat, C](
     space: Space[N, C],
+    orthSet: BitSet,
+    mubSet: BitSet,
     mubs: Int)(implicit ec: ExecutionContext): Future[Unit] = {
 
     println(s"# $space")
-    space.allMubsFuture(mubs)
+    space.allMubsFuture(orthSet, mubSet, mubs)
       .flatMap { mubsVector =>
         println(s"# found: ${mubsVector.length}")
 
@@ -788,7 +777,6 @@ object SearchApp extends CommandApp(
     }
 
     val goalMubs = Opts.option[Int]("mubs", "the number of mutually unbiased bases we try to find")
-      .orNone
 
     val threads: Opts[(ExecutionContext => Unit) => Unit] =
       Opts.option[Int]("threads", "number of threads to use, default = number of processors")
@@ -824,6 +812,10 @@ object SearchApp extends CommandApp(
         else Validated.invalidNel(s"invalid depth: $d")
       }
 
+    val orthTab = Opts.option[Path]("orth_tab", "path to orthogonality table")
+    val ubTab = Opts.option[Path]("ub_tab", "path to unbiasedness table")
+    val tableOpts: Opts[(Path, Path)] = orthTab.product(ubTab)
+
     val spaceOpt =
       realBits
         .product(dim)
@@ -831,13 +823,15 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
-      (spaceOpt, goalMubs, threads)
-        .mapN { (space, mubsOpt, cont) =>
+      (spaceOpt, goalMubs.orNone, threads, tableOpts)
+        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath)) =>
           // dim is the most we can get
           val mubs = mubsOpt.getOrElse(space.dim)
 
           cont { implicit ec =>
-            Await.result(VectorSpace.search(space, mubs), Inf)
+            val orthBS = VectorSpace.readPath(space, true, orthPath)
+            val ubBS = VectorSpace.readPath(space, false, ubPath)
+            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs), Inf)
           }
         }
 
@@ -845,11 +839,17 @@ object SearchApp extends CommandApp(
     val info =
       (spaceOpt,
         threads,
-        Opts.flag("bases", "compute all the standard bases and give the size").orFalse,
+        (Opts.flag("bases", "compute all the standard bases and give the size") *> orthTab).orNone,
         Opts.flag("sync", "run synchronous (less memory, but no concurrency)").orFalse,
-        goalMubs)
-        .mapN { (space, cont, bases, runSync, mubsOpt) =>
+        (goalMubs.product(ubTab)).orNone)
+        .mapN { (space, cont, bases0, runSync, mubsOpt0) =>
           cont { implicit ec =>
+            val bases = bases0.map { path =>
+              VectorSpace.readPath(space, true, path)
+            }
+            val mubsOpt = mubsOpt0.map { case (n, path) =>
+              (n, VectorSpace.readPath(space, false, path))
+            }
             Await.result(VectorSpace.runInfo(space, bases, runSync, mubsOpt), Inf)
           }
         }
