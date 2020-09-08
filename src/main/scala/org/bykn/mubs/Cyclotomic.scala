@@ -136,38 +136,50 @@ object Cyclotomic {
   implicit def rootNIsCyclotomic[N <: Nat, C](implicit C: Cyclotomic[N, C], toI: ToInt[N]): Cyclotomic[Succ[N], Root[Succ[N], C]] =
     new Cyclotomic[Succ[N], Root[Succ[N], C]] {
       def plus(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
-        // (a1 + sqrt(w) * b1) + (a2 + sqrt(w) * b2) =
-        Root(C.plus(left.alpha, right.alpha), C.plus(left.beta, right.beta))
+        if (left eq zero) right
+        else if (right eq zero) left
+        else {
+          // (a1 + sqrt(w) * b1) + (a2 + sqrt(w) * b2) =
+          Root(C.plus(left.alpha, right.alpha), C.plus(left.beta, right.beta))
+        }
 
       override def minus(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
         // (a1 + sqrt(w) * b1) - (a2 + sqrt(w) * b2) =
         Root(C.minus(left.alpha, right.alpha), C.minus(left.beta, right.beta))
 
-      def times(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] = {
-        // (a1 + sqrt(w) * b1) * (a2 + sqrt(w) * b2) =
-        // ((a1 * a2 + w * b1 * b2) + sqrt(w) * (b1 * a2 + b2 * a1)
-        val a12 = C.times(left.alpha, right.alpha)
-        val b12 = C.times(left.beta, right.beta)
-        val a1b2 = C.times(left.alpha, right.beta)
-        val a2b1 = C.times(left.beta, right.alpha)
+      def times(left: Root[Succ[N], C], right: Root[Succ[N], C]): Root[Succ[N], C] =
+        if ((left eq zero) || (right eq zero)) zero
+        else if (left eq one) right
+        else if (right eq one) left
+        else {
+          // (a1 + sqrt(w) * b1) * (a2 + sqrt(w) * b2) =
+          // ((a1 * a2 + w * b1 * b2) + sqrt(w) * (b1 * a2 + b2 * a1)
+          val a12 = C.times(left.alpha, right.alpha)
+          val b12 = C.times(left.beta, right.beta)
+          val a1b2 = C.times(left.alpha, right.beta)
+          val a2b1 = C.times(left.beta, right.alpha)
 
-        Root(
-          C.plus(a12, C.times(C.omega, b12)),
-          C.plus(a1b2, a2b1))
-      }
+          Root(
+            C.plus(a12, C.times(C.omega, b12)),
+            C.plus(a1b2, a2b1))
+        }
 
       def negate(c: Root[Succ[N], C]) =
-        Root(C.negate(c.alpha), C.negate(c.beta))
+        if (c eq zero) zero
+        else Root(C.negate(c.alpha), C.negate(c.beta))
 
       // re(a + sqrt(w) * b) =
       // re(a) + re(sqrt(w)) * re(b) - im(sqrt(w)) * im(b)
       def re(c: Root[Succ[N], C]): Real =
-        C.re(c.alpha) + reOmega * C.re(c.beta) - (imOmega * C.im(c.beta))
+        if (c eq zero) Real.zero
+        else if (c eq one) Real.one
+        else C.re(c.alpha) + reOmega * C.re(c.beta) - (imOmega * C.im(c.beta))
 
       // im(a + sqrt(w) * b) =
       // im(a) + im(sqrt(w)) * re(b) + re(sqrt(w)) * im(b)
       def im(c: Root[Succ[N], C]): Real =
-        C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
+        if ((c eq zero) || (c eq one)) Real.zero
+        else C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
 
       //
       //|a + sqrt(w)*b|^2 =
@@ -185,12 +197,8 @@ object Cyclotomic {
       //   im(a)im(sw)re(b) +
       // +i im(a)im(sw)im(b))
       def abs2(c: Root[Succ[N], C]): Real =
-        if (c.alpha == C.zero) {
-          C.abs2(c.beta)
-        }
-        else if (c.beta == C.zero) {
-          C.abs2(c.alpha)
-        }
+        if (c eq zero) Real.zero
+        else if ((c eq one) || (c eq omega)) Real.one
         else {
           val a = c.alpha
           val b = c.beta

@@ -85,7 +85,7 @@ object VectorSpace {
     }
 
     override def toString: String = {
-      s"Space(dim = $dim, roots = ${nroots} realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+      s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
     }
 
     def zeroVec(): Array[Int] = new Array[Int](dim)
@@ -312,18 +312,63 @@ object VectorSpace {
       count
     }
 
+    // all permutations then convert back to int
+    private def perms(buffer: Array[Int], v0: Int): Iterator[Int] = {
+      def loop(pos: Int): Iterator[Int] =
+        // we always leave the last digit to be 0
+        if (pos >= (buffer.length - 1)) Iterator.single(v0)
+        else {
+          // we can swap this position with any
+          // position to the right
+          (pos until buffer.length)
+            .iterator
+            .flatMap { swapIdx =>
+              val inners = loop(pos + 1)
+              // for each of the inners
+              // we could swap in any position
+              inners.map { v1 =>
+                intToVector(v1, buffer)
+                val tmp = buffer(swapIdx)
+                buffer(swapIdx) = buffer(pos)
+                buffer(pos) = tmp
+                val v2 = vectorToInt(buffer)
+                v2
+              }
+            }
+        }
+
+      loop(0)
+    }
+
     def buildCacheFuture(fn: Real => Boolean)(implicit ec: ExecutionContext): Future[BitSet] = {
       // first we compute all the traces that are orthogonal
       // the java bitset doesn't box on access
       val bitset = new BitSet(standardCount)
       val fut = Future
-        .traverse((0 until standardCount).grouped(10000).toList) { group =>
+        .traverse((0 until standardCount).grouped(2000).toList) { group =>
           Future {
             val tmp = new Array[Int](dim)
             group.foreach { v =>
               intToVector(v, tmp)
-              if (fn(trace(tmp))) {
-                bitset.synchronized { bitset.set(v) }
+              // we always fix the last item to 0
+              java.util.Arrays.sort(tmp, 0, dim - 1)
+              val v1 = vectorToInt(tmp)
+              if (v1 != v) {
+                // this is not the "root" value
+                ()
+              }
+              else {
+                // this is the root value, compute the trace once and set all
+                // the values
+                val bitIsSet = fn(trace(tmp))
+
+                if (bitIsSet) {
+                  bitset.synchronized {
+                    perms(tmp, v1).foreach { v =>
+                      bitset.set(v)
+                    }
+                  }
+                }
               }
             }
           }
@@ -398,6 +443,23 @@ object VectorSpace {
       }
     }
 
+    private def cliqueSync(edgeFn: Real => Boolean, size: Int): LazyList[Cliques.Family[Int]] = {
+      val set = buildCache(edgeFn)
+      val fn = buildCachedFn(set)
+      val inc = nextFn(set)
+      // we use an array for the ints because it is more space efficient
+      // than lists
+      Cliques.sync[Int](
+        size = size, // the number of items in a basis is the dimension, in addition to 0
+        initNode = inc(0),
+        incNode = inc,
+        isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
+        fn())
+    }
+
+    def allBasesSync: LazyList[Cliques.Family[Int]] =
+      cliqueSync(isOrth, dim - 1)
+
     def allBases(): List[Cliques.Family[Int]] =
       Await.result(allBasesFuture()(ExecutionContext.global), Inf)
 
@@ -423,6 +485,10 @@ object VectorSpace {
         isLastNode = { i: Int => (standardCount - 1) <= inc(i) },
         fn)
     }
+
+    // if there are cliqueSize, mubs, we are looking for cliqueSize - 1
+    def allMubVectorsSync(cliqueSize: Int): LazyList[Cliques.Family[Int]] =
+      cliqueSync(isUnbiased, cliqueSize - 1)
 
     /**
      * These are sets of mutually unbiased vectors.
@@ -653,12 +719,13 @@ object SearchApp extends CommandApp(
       (spaceOpt,
         threads,
         Opts.flag("bases", "compute all the standard bases and give the size").orFalse,
+        Opts.flag("sync", "run synchronous (less memory, but no concurrency)").orFalse,
         goalMubs)
-        .mapN { (space, cont, bases, mubsOpt) =>
+        .mapN { (space, cont, bases, runSync, mubsOpt) =>
           cont { implicit ec =>
             println(s"# $space")
             val f1 = if (bases) {
-              space.allBasesFuture().flatMap { bases0 =>
+              def showBases(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
                 Future {
                   val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
 
@@ -669,18 +736,30 @@ object SearchApp extends CommandApp(
                     println(s"we need to try $comb combinations of these, doing a total of ${comb * (mub * (mub - 1)/2)} inner products")
                   }
                 }
-              }
+
+              if (runSync) showBases(space.allBasesSync)
+              else space.allBasesFuture().flatMap(showBases)
             } else Future.unit
 
             val f2 = mubsOpt match {
               case Some(cliqueSize) =>
-                space.allMubVectorsFuture(cliqueSize).flatMap { bases0 =>
+                def showMub(bases0: Iterable[Cliques.Family[Int]]): Future[Unit] =
                   Future {
-                    val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
+                    println("showMub...")
+                    if (bases0.isEmpty) {
+                      println(s"there are 0 sets of mutually unbiased vectors of clique size = $cliqueSize")
+                    }
+                    else {
+                      println(s"nonEmpty... computing.")
+                      val basesLen = bases0.foldLeft(0L)(_ + _.cliqueCount)
 
-                    println(s"there are ${basesLen} sets of mutually unbiased vectors of clique size = $cliqueSize")
+                      println(s"there are ${basesLen} sets of mutually unbiased vectors of clique size = $cliqueSize")
+                    }
                   }
-                }
+
+
+                if (runSync) showMub(space.allMubVectorsSync(cliqueSize))
+                else space.allMubVectorsFuture(cliqueSize).flatMap(showMub)
               case None =>
                 Future.unit
             }

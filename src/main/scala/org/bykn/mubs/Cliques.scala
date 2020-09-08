@@ -212,22 +212,25 @@ object Cliques {
           }
         }
         else {
-          val ord = implicitly[Ordering[A]]
           val smaller = loop(size - 1)
-          // now we see which of these we can add a single node to:
-          all.flatMap { n1 =>
-            val neighborToN1 = nfn(n1)
-            val n1Children =
-              smaller
-                .flatMap {
-                  case f@Family.NonEmpty(h, rest) if ord.lt(n1, h) && neighborToN1(h) =>
-                    f.filter(neighborToN1)
-                  case _ =>
-                    None
-                }
+          if (smaller.isEmpty) LazyList.empty
+          else {
+            val ord = implicitly[Ordering[A]]
+            // now we see which of these we can add a single node to:
+            all.flatMap { n1 =>
+              val neighborToN1 = nfn(n1)
+              val n1Children =
+                smaller
+                  .flatMap {
+                    case f@Family.NonEmpty(h, rest) if ord.lt(n1, h) && neighborToN1(h) =>
+                      f.filter(neighborToN1)
+                    case _ =>
+                      None
+                  }
 
-            NonEmptyList.fromList(n1Children.toList)
-              .map(Family.NonEmpty(n1, _))
+              NonEmptyList.fromList(n1Children.toList)
+                .map(Family.NonEmpty(n1, _))
+            }
           }
         }
 
