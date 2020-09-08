@@ -1,5 +1,6 @@
 package org.bykn.mubs
 
+import algebra.ring.Ring
 import cats.Eval
 import com.monovore.decline.CommandApp
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
@@ -12,7 +13,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
 import shapeless.ops.nat.ToInt
 import shapeless.{Nat}
-import spire.math.{SafeLong, Real}
+import spire.math.{SafeLong, Complex, Real}
 
 /**
  * We say a pair of vectors, of dimension d
@@ -57,6 +58,7 @@ object VectorSpace {
 
     // array lookup is faster
     private val rootArray: Array[C] = C.roots.toArray
+    private val rootArrayComplex: Array[Complex[Real]] = C.roots.toArray.map(C.toComplex)
 
     private val nroots: Int = rootArray.length
 
@@ -89,6 +91,50 @@ object VectorSpace {
 
     override def toString: String = {
       s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+    }
+
+    // quantize a vector to the nearest root of unity
+    // this is for exploring quantization bounds
+    def quantize(vec: List[Complex[Real]]): List[Complex[Real]] = {
+      implicit val ordReal: Ordering[Real] =
+        new Ordering[Real] {
+          def compare(r1: Real, r2: Real) = (r1 - r2)(realBits).signum.toInt
+        }
+
+      def nearest(c: Complex[Real]): Complex[Real] =
+        rootArrayComplex
+          .minBy { wc =>
+            (c - wc).absSquare
+          }
+
+      vec.map(nearest)
+    }
+
+    def innerAbs2(left: List[Complex[Real]], right: List[Complex[Real]]): Real =
+      Ring[Complex[Real]]
+        .sum(
+          left.zip(right)
+            .map { case (u, v) =>
+              u.conjugate * v
+            })
+        .absSquare
+
+    //if we quantize to nearest root of unity, the inner product error is <= 2|<u, v>| eps + eps^2 with eps = 2d sin(pi/n)
+    def quantizationBoundGap(v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
+      require(v1.length == v2.length)
+      require(v1.length == dim)
+
+      val exact = innerAbs2(v1, v2)
+      val quant = innerAbs2(quantize(v1), quantize(v2))
+      val left = (exact - quant).abs
+      val right = (Real.two * exact.sqrt + eps) * eps
+
+      val gap = right - left
+
+      // we know that left <= right so gap >= 0
+      // we want the minimum value to be close to 0 to prove
+      // this bound is tight
+      gap
     }
 
     def zeroVec(): Array[Int] = new Array[Int](dim)
@@ -758,6 +804,47 @@ object VectorSpace {
         }
       }
   }
+
+
+  def quantBoundSearch[N <: Nat, C](
+    space: Space[N, C],
+    seed: Long,
+    trials: Int)(implicit ec: ExecutionContext): Future[Unit] = {
+
+      require(trials > 0)
+
+      val rng = new java.util.Random(seed)
+
+      // this is a root of unity
+      def nextC(): Complex[Real] = {
+        // return exp(2 * pi * i *phi)
+        val theta = Real(2 * rng.nextDouble()) * Real.pi
+        Complex(Real.cos(theta), Real.sin(theta))
+      }
+
+      def nextV(): List[Complex[Real]] =
+        (0 until space.dim)
+          .iterator
+          .map { _ => nextC() }
+          .toList
+
+      // do this outside of the future since we mutate rng
+      val pairs = (0 until trials).map { _ => (nextV(), nextV()) }
+
+      // now compute the gaps
+      Future.traverse(pairs) { case (v1, v2) =>
+        Future(space.quantizationBoundGap(v1, v2).doubleValue())
+      }
+      .map { gaps =>
+
+        val minGap = gaps.min
+        val maxGap = gaps.max
+        val totalGap = gaps.sum
+        println(s"minGap = $minGap")
+        println(s"maxGap = $maxGap")
+        println(s"aveGap = ${totalGap / trials}")
+      }
+  }
 }
 
 object SearchApp extends CommandApp(
@@ -873,11 +960,25 @@ object SearchApp extends CommandApp(
           }
         }
 
+    val quantSearch = {
+      (spaceOpt,
+        threads,
+        Opts.option[Long]("seed", "the seed to use, or use nanoTime").orElse(Opts(System.nanoTime())),
+        Opts.option[Int]("count", "the number of pairs to check, default = 1000").orElse(Opts(1000)))
+        .mapN { (space, cont, seed, cnt) =>
+          cont { implicit ec =>
+            Await.result(VectorSpace.quantBoundSearch(space, seed, cnt), Inf)
+          }
+        }
+    }
+
     Opts.subcommand("search", "run a search for mubs")(search)
       .orElse(
         Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
       .orElse(
         Opts.subcommand("write_table", "compute an orthogonality/unbiasedness table and write to file")(writeTable))
+      .orElse(
+        Opts.subcommand("quant_search", "explore the tightness of the quantization bound")(quantSearch))
   }
 
 )
