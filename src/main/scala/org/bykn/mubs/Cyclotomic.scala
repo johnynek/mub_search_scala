@@ -27,6 +27,9 @@ sealed abstract class Cyclotomic[N <: Nat, C] extends CommutativeRing[C] {
   // this is Im(omega)
   def imOmega: Real
 
+  // this can often be optimized
+  def timesOmega(c: C): C
+
   def root: N
 
   // a vector of length 2^N
@@ -61,6 +64,7 @@ object Cyclotomic {
       // omega to the 2^(root) power == one
       // omega to the (2^root - 1) power != one
       def omega = Rational.one
+      def timesOmega(c: Rational) = c
       def reOmega = Rational.one
       def imOmega = Rational.zero
 
@@ -88,6 +92,7 @@ object Cyclotomic {
       def zero = Rational.zero
       // omega to the 2^root power == one
       def omega = -Rational.one
+      def timesOmega(r: Rational) = -r
       val reOmega = -Real.one
       val imOmega = Real.zero
 
@@ -116,6 +121,7 @@ object Cyclotomic {
       def omega = -SafeLong.one
       val reOmega = -Real.one
       val imOmega = Real.zero
+      def timesOmega(c: SafeLong) = -c
 
       val root: Nat._1 = Succ()
       val roots: Vector[SafeLong] = Vector(one, omega)
@@ -160,9 +166,19 @@ object Cyclotomic {
           val a2b1 = C.times(left.beta, right.alpha)
 
           Root(
-            C.plus(a12, C.times(C.omega, b12)),
+            C.plus(a12, C.timesOmega(b12)),
             C.plus(a1b2, a2b1))
         }
+
+      def timesOmega(c: Root[Succ[N], C]): Root[Succ[N], C] =
+        // sqrt(w) * (a2 + sqrt(w) * b2) =
+        // w * b2 + sqrt(w) a2
+        if (c eq zero) zero
+        else if (c eq one) omega
+        // we could imagine special casing any element of roots
+        // but that would take roots.length work on each
+        // call for a maybe rare case
+        else Root(C.timesOmega(c.beta), c.alpha)
 
       def negate(c: Root[Succ[N], C]) =
         if (c eq zero) zero
@@ -173,15 +189,16 @@ object Cyclotomic {
       def re(c: Root[Succ[N], C]): Real =
         if (c eq zero) Real.zero
         else if (c eq one) Real.one
+        else if (c eq omega) reOmega
         else C.re(c.alpha) + reOmega * C.re(c.beta) - (imOmega * C.im(c.beta))
 
       // im(a + sqrt(w) * b) =
       // im(a) + im(sqrt(w)) * re(b) + re(sqrt(w)) * im(b)
       def im(c: Root[Succ[N], C]): Real =
         if ((c eq zero) || (c eq one)) Real.zero
+        else if (c eq omega) imOmega
         else C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
 
-      //
       //|a + sqrt(w)*b|^2 =
       //(a + sqrt(w)*b)*(a' + sqrt(w)'b')
       //|a|^2 + |w|*|b|^2 + a'*sqrt(w)*b + a*sqrt(w)'b'
@@ -241,7 +258,7 @@ object Cyclotomic {
         val m = toI() + 1
         val twoM = 1 << m
         (1 until twoM).scanLeft(one) { (prev, _) =>
-          times(prev, omega)
+          timesOmega(prev)
         }
         .toVector
       }
