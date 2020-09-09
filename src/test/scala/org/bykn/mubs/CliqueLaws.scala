@@ -1,15 +1,31 @@
 package org.bykn.mubs
 
-import org.scalacheck.Prop.forAll
-
-import org.scalacheck.Prop
+import cats.data.NonEmptyList
 import java.util.concurrent.Executors
-import scala.concurrent.{Await, ExecutionContext, Future}
+import org.scalacheck.Prop.forAll
+import org.scalacheck.Arbitrary.arbitrary
+import org.scalacheck.{Gen, Prop}
 import scala.concurrent.duration.Duration.Inf
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 class CliqueLaws extends munit.ScalaCheckSuite {
 
   implicit val cpuEC: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()))
+
+
+  def genCliqueFamily[A](size: Int, ga: Gen[A], branch: Gen[Int]): Gen[Cliques.Family[A]] =
+    if (size <= 0) Gen.const(Cliques.Family.Empty)
+    else {
+      val recur = Gen.lzy(genCliqueFamily(size - 1, ga, branch))
+      for {
+        head <- ga
+        children <- branch
+        // make sure we have at least 1 to make an NEL
+        childList0 <- Gen.listOfN(children max 1, recur)
+        // make sure we generate legit cliques so that we don't repeat head branches in children
+        childList = childList0.groupBy(_.headOption).iterator.map { case (_, vs) => (vs.head) }.toList
+      } yield Cliques.Family.NonEmpty(head, NonEmptyList.fromListUnsafe(childList))
+    }
 
   // make all possible combinations of size, then filter such that they are all neighbors
   @annotation.tailrec
@@ -18,6 +34,14 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       case Nil => true
       case h1 :: tail =>
         tail.forall { h2 => (h1 != h2) && nfn(h1, h2) } && isClique(tail)(nfn)
+    }
+  // this isClique doesn't care about nodes being distinct
+  @annotation.tailrec
+  final def isCliqueLax[A](lst: List[A])(nfn: (A, A) => Boolean): Boolean =
+    lst match {
+      case Nil => true
+      case h1 :: tail =>
+        tail.forall { h2 => nfn(h1, h2) } && isCliqueLax(tail)(nfn)
     }
 
   def naiveCliques[A: Ordering](size: Int, nodes: LazyList[A], nfn: (A, A) => Boolean): LazyList[List[A]] = {
@@ -124,5 +148,49 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
   property("for cliques of size 4 we match naive") {
     forAll(matchLaw(4, 10)(_))
+  }
+
+  property("cliqueMerge matches a naive crossproduct + filter") {
+    val pair =
+      Gen.choose(0, 3)
+        .flatMap { size =>
+          val genC = genCliqueFamily(size, Gen.oneOf(true, false), Gen.choose(1, 4))
+          Gen.zip(genC, genC)
+        }
+
+    val mergeFn = arbitrary[((Boolean, Boolean), (Boolean, Boolean)) => Boolean]
+
+    forAll(pair, mergeFn) { case ((cl0, cl1), fn) =>
+      val cl01 = Cliques.Family.cliqueMerge(cl0, cl1)(fn)
+
+      implicit def listOrd[A: Ordering]: Ordering[List[A]] =
+        new Ordering[List[A]] {
+          @annotation.tailrec
+          final def compare(left: List[A], right: List[A]): Int =
+            (left, right) match {
+              case (Nil, Nil) => 0
+              case (Nil, _) => -1
+              case (_ :: _, Nil) => 1
+              case (lh :: lt, rh :: rt) =>
+                val c = Ordering[A].compare(lh, rh)
+                if (c == 0) compare(lt, rt)
+                else c
+            }
+        }
+
+      val naive: List[List[(Boolean, Boolean)]] =
+        (for {
+          c0 <- cl0.cliques
+          c1 <- cl1.cliques
+          zipped = c0.zip(c1)
+          if (isCliqueLax(zipped)(fn))
+        } yield zipped).toList.map(_.sorted).sorted
+
+      val fancy: List[List[(Boolean, Boolean)]] =
+        cl01.to(LazyList).flatMap(_.cliques).toList
+          .map(_.sorted).sorted
+
+      assert(fancy == naive, s"$fancy\n\n!=\n\n$naive\n\n($cl01)")
+    }
   }
 }

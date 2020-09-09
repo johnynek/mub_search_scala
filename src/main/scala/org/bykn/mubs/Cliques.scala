@@ -1,8 +1,11 @@
 package org.bykn.mubs
 
+import cats.{Eval, Traverse}
 import cats.data.NonEmptyList
 import scala.reflect.ClassTag
 import scala.concurrent.{ExecutionContext, Future}
+
+import cats.implicits._
 
 object Cliques {
   /**
@@ -10,27 +13,35 @@ object Cliques {
    * begin with the same item
    */
   sealed abstract class Family[+A] {
+    def headOption: Option[A]
     def cliques: LazyList[List[A]]
+    // how big are the cliques
     def cliqueSize: Int
+    // how many cliques are in this family
     def cliqueCount: Long
     // return the same cliqueSize family
     // such that all items have true
     def filter(fn: A => Boolean): Option[Family[A]]
+
+    def map[B](fn: A => B): Family[B]
   }
   object Family {
     final case object Empty extends Family[Nothing] {
+      def headOption: Option[Nothing] = None
       def cliques = LazyList(Nil)
       def cliqueSize: Int = 0
       def cliqueCount: Long = 1L
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
+      def map[B](fn: Nothing => B): Family[B] = this
     }
     // invariants:
     // 1. all items in tails have the same cliqueSize
     // 2. head < all heads in tails
     final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
+      def headOption: Option[A] = Some(head)
       def cliques = tails.toList.to(LazyList).flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
-      def cliqueCount: Long =
+      lazy val cliqueCount: Long =
         tails.foldLeft(0L)(_ + _.cliqueCount)
 
       def filter(fn: A => Boolean): Option[Family[A]] =
@@ -39,7 +50,90 @@ object Cliques {
             .map(NonEmpty(head, _))
         }
         else None
+
+      def map[B](fn: A => B): Family[B] =
+        NonEmpty(fn(head), tails.map(_.map(fn)))
     }
+
+    def chooseN[A](n: Int, items: List[A]): List[Family[A]] =
+      if (n < 0) Nil
+      else if (n == 0) (Empty :: Nil)
+      else if (items.isEmpty) Nil // can't take more than 0 from an empty list
+      else {
+        NonEmptyList.fromList(chooseN(n - 1, items)) match {
+          case None => Nil
+          case Some(rest) =>
+            // compute the tail once and share
+            // the reference with all items
+            items.map { a => NonEmpty(a, rest) }
+        }
+      }
+
+    implicit val traverseForFamily: Traverse[Family] =
+      new Traverse[Family] {
+        override def map[A, B](fa: Family[A])(fn: A => B): Family[B] =
+          fa.map(fn)
+
+        def foldLeft[A, B](fa: Family[A], b: B)(f: (B, A) => B): B =
+          fa match {
+            case Empty => b
+            case NonEmpty(a, rest) =>
+              val b1 = f(b, a)
+              rest.foldLeft(b1) { case (b, fam) =>
+                foldLeft(fam, b)(f)
+              }
+          }
+        def foldRight[A, B](fa: Family[A], lb: Eval[B])(f: (A, Eval[B]) => Eval[B]): Eval[B] =
+          fa match {
+            case Empty => lb
+            case NonEmpty(a, rest) =>
+              val restRes: Eval[B] =
+                Eval.defer(rest.foldRight(lb) { case (fam, lb) =>
+                  foldRight(fam, lb)(f)
+                })
+              f(a, restRes)
+          }
+
+        def traverse[G[_], A, B](fa: Family[A])(f: A => G[B])(implicit G: cats.Applicative[G]): G[Family[B]] =
+          fa match {
+            case Empty => G.pure(Empty)
+            case NonEmpty(a, rest) =>
+              (f(a), rest.traverse { fam => traverse(fam)(f) })
+                .mapN(NonEmpty(_, _))
+          }
+        }
+
+      // this is like a clique from two cliques
+      def cliqueMerge[A, B, C](fa: Family[A], fb: Family[B])(fn: ((A, B), (A, B)) => Boolean): Option[Family[(A, B)]] = {
+        def loop(outer: List[(A, B)], fa: Family[A], fb: Family[B]): Option[Family[(A, B)]] =
+          (fa, fb) match {
+            case (Empty, Empty) => Some(Empty)
+            case (NonEmpty(a, as), NonEmpty(b, bs)) =>
+              val headAB = (a, b)
+              if (!outer.forall(fn(_, headAB))) {
+                // we cannot add to this clique
+                None
+              }
+              else {
+                val outer1 = headAB :: outer
+                val children =
+                  for {
+                    aa <- as.toList
+                    bb <- bs.toList
+                    ab <- loop(outer1, aa, bb).toList
+                  } yield ab
+
+                NonEmptyList.fromList(children)
+                  .map(NonEmpty(headAB, _))
+              }
+
+            case _ =>
+              // these are misaligned
+              None
+          }
+
+        loop(Nil, fa, fb)
+      }
   }
 
   final def andN[@specialized(Int) A](n0: A => Boolean, n1: A => Boolean): A => Boolean =
