@@ -119,15 +119,15 @@ object VectorSpace {
             })
         .absSquare
 
-    //if we quantize to nearest root of unity, the inner product error is <= 2|<u, v>| eps + eps^2 with eps = 2d sin(pi/n)
+    //if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)
     def quantizationBoundGap(v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
       require(v1.length == v2.length)
       require(v1.length == dim)
 
-      val exact = innerAbs2(v1, v2)
-      val quant = innerAbs2(quantize(v1), quantize(v2))
+      val exact = innerAbs2(v1, v2).sqrt
+      val quant = innerAbs2(quantize(v1), quantize(v2)).sqrt
       val left = (exact - quant).abs
-      val right = (Real.two * exact.sqrt + eps) * eps
+      val right = eps
 
       val gap = right - left
 
@@ -242,45 +242,36 @@ object VectorSpace {
       C.abs2(acc)
     }
 
-    val orthEps = eps.pow(2)
-    // we know |a|^2 <= d^2
-    // so if orthEps >= d^2 this is trivial
+    // we know |a| <= d
+    // so if orthEps >= d this is trivial
     // and everything is orthogonal
     val orthEpsIsTrivial: Boolean =
-      (orthEps - realD.pow(2)).compare(0) >= 0
+      (eps - realD).compare(0) >= 0
 
     /**
-     * the difference between the quantized
-     * and the actual mag^2 is
-     * 2 |<u, v>| eps + eps^2
-     * for orthogonal vectors, that reduces
-     * to eps^2
+     * ||<u', v'>| - |<u, v>|| <= eps
+     * but |<u, v>| = 0
      */
     def isOrth(r: Real): Boolean = {
-      val diff = r - orthEps
+      val diff = r.sqrt - eps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
 
-    val ubEps = eps * (Real.two * realD.sqrt + eps)
-
-    // we know |a|^2 <= d^2
-    // so, ||a|^2 - d| <= d^2 - d
+    // we know |a| <= d
+    // so, ||a|- sqrt(d)| <= d + sqrt(d)
     //
-    // so if ubEps >= d^2 - d this is trivial
+    // so if ubEps >= d + sqrt(d) this is trivial
     // and everything is unbiased
     val ubEpsIsTrivial: Boolean =
-      (ubEps - (realD.pow(2) - realD)).compare(0) >= 0
+      (eps - (realD + realD.sqrt)).compare(0) >= 0
 
     /**
-     * the difference between the quantized
-     * and the actual mag^2 is
-     * 2 |<u, v>| eps + eps^2
-     * for unbiased vectors, that reduces
-     * to eps * (2 d.sqrt +  eps)
+     * ||<u', v'>| - |<u, v>|| <= eps
+     * ||<u', v'>| - sqrt(d)| <= eps
      */
     def isUnbiased(r: Real): Boolean = {
-      val diff = (r - realD).abs - ubEps
+      val diff = (r.sqrt - realD.sqrt).abs - eps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
@@ -294,19 +285,6 @@ object VectorSpace {
       // now, we want to see if
       // |acc - d| <= 4d sin^2(pi / n)
       isUnbiased(dotAbs2(v1, v2))
-
-    // we represent each hadamard as a set of indices into the roots
-    @annotation.tailrec
-    final def isApproximatelyOrthogonal(vectors: List[Array[Int]]): Boolean = {
-      vectors match {
-        case Nil => true
-        case h :: rest =>
-          // the head has to be approximately orthogonal:
-          rest.forall { r =>
-            maybeOrth(h, r)
-          } && isApproximatelyOrthogonal(rest)
-      }
-    }
 
     // we own from and can mutate it
     @annotation.tailrec

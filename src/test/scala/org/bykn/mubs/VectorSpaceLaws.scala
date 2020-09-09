@@ -322,7 +322,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       }
   }
 
-  property("if we quantize to nearest root of unity, the inner product error is <= 2|<u, v>| eps + eps^2 with eps = 2d sin(pi/n)") {
+  property("if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)") {
     /*
      * Proof:
      * a = <u, v> = sum_i exp(2 pi (v(i) - u(i))/n)
@@ -330,14 +330,15 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
      *              = <u, v> + sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
      * c = sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
      * a = b + c
-     * |a|^2 = |b|^2 + 2Re(b* c) + |c|^2
-     * ||a|^2 - |b|^2| <= |2Re(b* c) + |c|^2|
+     * |a| <= |b| + |c|
+     * |a| - |b| <= |c|
+     * ||a| - |b|| <= |c|
      *
-     * |2Re(b* c) <= 2|b||c|
-     *
-     * to bound |c| use cauchy-schwarz:
-     * |c|^2 <= (\sum_i |exp(2 pi (v(i) - u(i)/n))|^2)(\sum_i |(exp(2 pi (dv(i) - du(i)) / n) - 1)|^2)
-     *        = d * 4 * d * sin^2(pi / n) if n > 1, else 4d^2
+     * to bound |c|:
+     * |c| == |\sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)|
+     *     <= \sum_i |exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)|
+     *     = \sum_i 2|sin(2 pi (dv(i) - du(i))/n)|
+     *     <= 2 d sin(pi/n) if n > 1, else 2d
      */
     case class Example(v1: List[Complex[Real]], v2: List[Complex[Real]], nth: Int) {
       require(v1.length == v2.length)
@@ -351,8 +352,8 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       val quantV2 = v2.map(nearest(_, roots))
 
       // the magnitude difference
-      val mag = dot2(v1, v2)
-      val quantMag = dot2(quantV1, quantV2)
+      val mag = dot2(v1, v2).sqrt
+      val quantMag = dot2(quantV1, quantV2).sqrt
 
       // here is the theorem of the paper:
       val diff = (mag - quantMag).abs
@@ -371,7 +372,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
         ).mkString("\n")
 
       val gamma = if (nth == 1) Real(2*d) else Real(2*d) * Real.sin(Real.pi / nth)
-      val eps = mag.sqrt * gamma * Real(2) + gamma.pow(2)
+      val eps = gamma
       val law = diff.compare(eps) <= 0
     }
 
