@@ -220,7 +220,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     s.map(_.map(_.sorted).sorted).sorted
 
   test("crossSimple is simple") {
-    val twoBits = Cliques.Family.chooseN(2, List(true, false))
+    val twoBits = Cliques.Family.chooseN(2, List(true, false)).toList
     val fourBits = Cliques.Family.chooseN(2, twoBits)
 
     assert(cross(List(List(1), List(2))) == List(List(1, 2)))
@@ -231,7 +231,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     val fourCross = fourBits.flatMap(crossSimple(_))
 
-    assert(sort3(fourCross) == sort3(List(
+    assert(sort3(fourCross.toList) == sort3(List(
       List(List(true, true), List(true, true)),
       List(List(true, true), List(true, false)),
       List(List(true, true), List(false, true)),

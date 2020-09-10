@@ -26,11 +26,22 @@ object Cliques {
 
     def map[B](fn: A => B): Family[B]
 
+
     def toDoc: Doc
 
     override def toString = toDoc.renderTrim(80)
   }
   object Family {
+    implicit class InvariantMethods[A](private val self: Family[A]) extends AnyVal {
+      def collectHead(fn: A => Option[A]): Option[Family[A]] =
+        self match {
+          case Empty => Some(Empty)
+          case NonEmpty(a, rest) =>
+            fn(a).map(NonEmpty(_, rest))
+        }
+
+    }
+
     final case object Empty extends Family[Nothing] {
       def headOption: Option[Nothing] = None
       def cliques = LazyList(Nil)
@@ -71,17 +82,17 @@ object Cliques {
       }
     }
 
-    def chooseN[A](n: Int, items: List[A]): List[Family[A]] =
-      if (n < 0) Nil
-      else if (n == 0) (Empty :: Nil)
-      else if (items.isEmpty) Nil // can't take more than 0 from an empty list
+    def chooseN[A](n: Int, items: List[A]): LazyList[Family[A]] =
+      if (n < 0) LazyList.empty
+      else if (n == 0) LazyList(Empty)
+      else if (items.isEmpty) LazyList.empty // can't take more than 0 from an empty list
       else {
-        NonEmptyList.fromList(chooseN(n - 1, items)) match {
-          case None => Nil
+        NonEmptyList.fromList(chooseN(n - 1, items).toList) match {
+          case None => LazyList.empty
           case Some(rest) =>
             // compute the tail once and share
             // the reference with all items
-            items.map { a => NonEmpty(a, rest) }
+            items.to(LazyList).map { a => NonEmpty(a, rest) }
         }
       }
 

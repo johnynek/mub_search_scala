@@ -6,6 +6,7 @@ import cats.data.NonEmptyList
 import com.monovore.decline.CommandApp
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import java.util.BitSet
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 import java.nio.file.Path
@@ -530,7 +531,7 @@ object VectorSpace {
 
     // transform all but the first with a the corresponding mub
     // we add back the 0 vector to the front in the results
-    private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family[Int], ubBitSet: BitSet): LazyList[Mubs] = {
+    private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family.NonEmpty[Int], ubBitSet: BitSet): LazyList[Mubs] = {
 
       // TODO we are still using crossProduct
       // below which seems to be not leveraing the
@@ -546,41 +547,57 @@ object VectorSpace {
       // maybe we need some kind of crossMerge function
       import Cliques.Family
 
-      val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
-
       val cp = conjProdInt()
 
-      Family
-        .crossProduct(hs)
-        .flatMap { bases: Family[Basis] =>
+      val mub0 = mubs.head
+      val hs1Opt =
+          // The entire first basis has to be unbiased to the first mub
+          // we can use that to trim down the search
+          hs.collectHead { h0 =>
+            h0.filter { h =>
+              ubBitSet.get(cp(h, mub0))
+            }
+          }
 
-          // the basis is a standard basis (missing the first all 0 vector)
-          // the int is a MUB vector to be applied to this basis
-          def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
-            // both bases are augmented with the 0 value
-            // we switch the phase because we put it on the left
-            val overall = cp(b1._2, b0._2)
-            val v1s = (0 :: b1._1)
-            (0 :: b0._1).forall { v0 =>
-              v1s.forall { v1 =>
-                ubBitSet.get(cp(overall, cp(v0, v1)))
+      hs1Opt match {
+        case None => LazyList.empty
+        case Some(hs1) =>
+
+          val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
+
+          //
+          Family
+            .crossProduct(hs1)
+            .flatMap { bases: Family[Basis] =>
+
+              // the basis is a standard basis (missing the first all 0 vector)
+              // the int is a MUB vector to be applied to this basis
+              def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
+                // both bases are augmented with the 0 value
+                // we switch the phase because we put it on the left
+                val overall = cp(b1._2, b0._2)
+                val v1s = (0 :: b1._1)
+                (0 :: b0._1).forall { v0 =>
+                  v1s.forall { v1 =>
+                    ubBitSet.get(cp(overall, cp(v0, v1)))
+                  }
+                }
               }
-            }
-          }
 
-          def toFull(b0: Basis, mub: Int): Basis = {
-            // we have to do the conjugate twice
-            val conjMub = cp(mub, 0)
-            (0 :: b0).map { v =>
-              cp(conjMub, v)
-            }
-          }
+              def toFull(b0: Basis, mub: Int): Basis = {
+                // we have to do the conjugate twice
+                val conjMub = cp(mub, 0)
+                (0 :: b0).map { v =>
+                  cp(conjMub, v)
+                }
+              }
 
-          Cliques.Family.cliqueMerge(bases, mubWithZero)(areUnbiased(_, _))
-            .map { mubF =>
-              mubF.map { case (b, i) => toFull(b, i) }
+              Cliques.Family.cliqueMerge(bases, mubWithZero)(areUnbiased(_, _))
+                .map { mubF =>
+                  mubF.map { case (b, i) => toFull(b, i) }
+                }
             }
-        }
+      }
     }
 
     /**
@@ -590,39 +607,90 @@ object VectorSpace {
      */
     def allMubsFuture(orthSet: BitSet, ubBitSet: BitSet, cnt: Int)(implicit ec: ExecutionContext): Future[List[List[List[Int]]]] = {
 
-        val mubs = allMubVectorsFuture(ubBitSet, cnt)
+        def log[A](str: String, f: => Future[A]): Future[A] = {
+          val start = System.currentTimeMillis()
+          println(s"#starting: $str")
+          val fut = f
+          fut.flatMap { a =>
+            Future {
+              val end = System.currentTimeMillis()
+              println(f"#done: $str (${(end - start)/1000.0}%.3f s)")
+              a
+            }
+          }
+        }
+        val mubs = log("allMubVectorsFuture", allMubVectorsFuture(ubBitSet, cnt))
         // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
         // to transform them. We have to include the phantom 0 vector
         def assemble(bases: List[Cliques.Family[Int]], mubV: List[Cliques.Family[Int]]): Future[List[List[List[Int]]]] = {
           require(bases.forall(_.cliqueSize == dim - 1), "invalid basis size")
           require(mubV.forall(_.cliqueSize == (cnt - 1)), "invalid mub size")
 
-          Future.traverse(mubV) { ubv =>
-            Future {
-              // these are all sets of cnt bases
-              // in every possible order
-              //
-              // these are as cheap to compute as iterate so don't keep them
-              // in memory
-              Cliques.Family.chooseN(cnt, bases)
-                .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
-                  transformStdBasis(hs, ubv, ubBitSet)
-                }
+          val mubsCount = new AtomicLong(0L)
+          val start = System.currentTimeMillis()
+          val mubVLen = mubV.length
+
+          def remaining(idx: Int, found: Long): Unit = {
+            if ((idx < 10) || (idx % (mubVLen / 100) == 1)) {
+              val end = System.currentTimeMillis()
+              val idxD = idx.toDouble
+              val currentRateMs = (idxD + 1)/(end - start)
+              val remainingMs = (mubVLen - (idx + 1)) / currentRateMs
+              val remainingSec = remainingMs / 1000
+
+              println(f"#done: ${idxD/mubVLen}%2.2f, found: $found, ${remainingSec}%.1f sec remaining")
             }
           }
-          .map { listListFam: List[List[Mubs]] =>
-            val allMubs: List[Mubs] = listListFam.flatten
-            // Mubs = Family[List[Int]]
-            // this may not be right
-            for {
-              mub <- allMubs
-              basis <- mub.cliques
-            } yield basis
+          Future.traverse(mubV.zipWithIndex) {
+            case (ubv@Cliques.Family.NonEmpty(h, _), idx) =>
+              Future {
+                // these are all sets of cnt bases
+                // in every possible order
+                //
+                // these are as cheap to compute as iterate so don't keep them
+                // in memory
+                val trans: Iterator[Mubs] =
+                  Cliques.Family
+                    .chooseN(cnt, bases)
+                    .iterator
+                    .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
+                      transformStdBasis(hs, ubv, ubBitSet).iterator
+                    }
+
+                val res: List[List[List[Int]]] =
+                  trans
+                    .flatMap(_.cliques)
+                    .toList
+
+                val thisCount = res.length
+                val current = mubsCount.addAndGet(thisCount)
+                if (current == thisCount) {
+                  println(s"#found the first $current mubs")
+                }
+
+                remaining(idx, current)
+                res
+              }
+            case (Cliques.Family.Empty, _) =>
+              Future {
+                val res: List[List[List[Int]]] =
+                  bases.flatMap { fam =>
+                    val withZero = Cliques.Family.NonEmpty(0, NonEmptyList(fam, Nil))
+                    withZero.cliques.map(_ :: Nil).toList
+                  }
+
+                res
+              }
           }
+          .map(_.flatten)
         }
 
-        allBasesFuture(orthSet).zip(mubs)
-          .flatMap { case (bases, mubV) => assemble(bases, mubV) }
+        log("allBasesFuture", allBasesFuture(orthSet)).zip(mubs)
+          .flatMap {
+            case (bases, mubV) =>
+              println("#calling assemble")
+              assemble(bases, mubV)
+          }
       }
 
     def allMubs(orthSet: BitSet, ubBitSet: BitSet, cnt: Int): List[List[List[Int]]] =
@@ -785,14 +853,16 @@ object VectorSpace {
     space: Space[N, C],
     orthSet: BitSet,
     mubSet: BitSet,
-    mubs: Int)(implicit ec: ExecutionContext): Future[Unit] = {
+    mubs: Int,
+    limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
 
     println(s"# $space")
     space.allMubsFuture(orthSet, mubSet, mubs)
-      .flatMap { mubsVector =>
-        println(s"# found: ${mubsVector.length}")
-
+      .flatMap { mubsVector0 =>
         Future {
+          println(s"# found: ${mubsVector0.length}")
+
+          val mubsVector = limit.fold(mubsVector0)(mubsVector0.take(_))
           var idx = 0
           val ary = new Array[Int](space.dim)
 
@@ -918,15 +988,15 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
-      (spaceOpt, goalMubs.orNone, threads, tableOpts)
-        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath)) =>
+      (spaceOpt, goalMubs.orNone, threads, tableOpts, Opts.option[Int]("limit", "limit printing out to this many mubs").orNone)
+        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), limit) =>
           // dim is the most we can get
           val mubs = mubsOpt.getOrElse(space.dim)
 
           cont { implicit ec =>
             val orthBS = VectorSpace.readPath(space, true, orthPath)
             val ubBS = VectorSpace.readPath(space, false, ubPath)
-            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs), Inf)
+            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, limit), Inf)
           }
         }
 
