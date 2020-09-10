@@ -13,6 +13,7 @@ lazy val root = (project in file("."))
       "org.typelevel" %% "spire" % "0.17.0-RC1",
       "org.typelevel" %% "algebra" % "2.0.1",
       "org.typelevel" %% "cats-core" % "2.2.0",
+      "org.typelevel" %% "paiges-core" % "0.3.2",
       "com.chuusai" %% "shapeless" % "2.3.3",
       "org.scalameta" %% "munit" % "0.7.12" % Test,
       "org.scalameta" %% "munit-scalacheck" % "0.7.12" % Test,

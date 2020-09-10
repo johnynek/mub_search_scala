@@ -2,6 +2,7 @@ package org.bykn.mubs
 
 import algebra.ring.Ring
 import cats.Eval
+import cats.data.NonEmptyList
 import com.monovore.decline.CommandApp
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
 import java.util.concurrent.Executors
@@ -14,6 +15,8 @@ import scala.reflect.ClassTag
 import shapeless.ops.nat.ToInt
 import shapeless.{Nat}
 import spire.math.{SafeLong, Complex, Real}
+
+import cats.implicits._
 
 /**
  * We say a pair of vectors, of dimension d
@@ -521,40 +524,64 @@ object VectorSpace {
     def allMubVectors(ubBitSet: BitSet, cliqueSize: Int): List[Cliques.Family[Int]] =
       Await.result(allMubVectorsFuture(ubBitSet, cliqueSize)(ExecutionContext.global), Inf)
 
+    type BasisF = Cliques.Family[Int]
+    type Basis = List[Int]
+    type Mubs = Cliques.Family[Basis]
+
     // transform all but the first with a the corresponding mub
     // we add back the 0 vector to the front in the results
-    private def transformStdBasis(hs: List[List[Int]], mub: List[Int], ubBitSet: BitSet): Option[List[List[Int]]] =
-      hs match {
-        case Nil => None
-        case h :: rest =>
-          val cp = conjProdInt()
-          // we use conjugate product to transform, but we could also not use conjugate (since
-          // conjugate of H is another H
-          require(rest.size == mub.size)
-          val restz: List[List[Int]] =
-            mub.zip(rest)
-              .map { case (z, had) =>
-                (cp(z, 0) :: had.map(cp(z, _)))
+    private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family[Int], ubBitSet: BitSet): LazyList[Mubs] = {
+
+      // TODO we are still using crossProduct
+      // below which seems to be not leveraing the
+      // fact that we can remove subtrees of bases that
+      // are not fully unbiased to the mubs faster
+      // e.g. any head basis that isn't unbiased
+      // to all the mubs definitely won't work
+      // so, we could filter first
+      // or, if we can use cliqueMerge directly on hs and mubs
+      // somehow we will save a massive amount of work
+      // but we may need to generalize since hs
+      // involves the cross-product somehow
+      // maybe we need some kind of crossMerge function
+      import Cliques.Family
+
+      val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
+
+      val cp = conjProdInt()
+
+      Family
+        .crossProduct(hs)
+        .flatMap { bases: Family[Basis] =>
+
+          // the basis is a standard basis (missing the first all 0 vector)
+          // the int is a MUB vector to be applied to this basis
+          def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
+            // both bases are augmented with the 0 value
+            // we switch the phase because we put it on the left
+            val overall = cp(b1._2, b0._2)
+            val v1s = (0 :: b1._1)
+            (0 :: b0._1).forall { v0 =>
+              v1s.forall { v1 =>
+                ubBitSet.get(cp(overall, cp(v0, v1)))
               }
+            }
+          }
 
-          val h1 = 0 :: h
+          def toFull(b0: Basis, mub: Int): Basis = {
+            // we have to do the conjugate twice
+            val conjMub = cp(mub, 0)
+            (0 :: b0).map { v =>
+              cp(conjMub, v)
+            }
+          }
 
-          val allBases = h1 :: restz
-
-          val isUB =
-            allDistinctPairs(allBases)
-              .forall { case (h1, h2) =>
-                h1
-                  .forall { v1 =>
-                    h2.forall { v2 =>
-                      ubBitSet.get(cp(v1, v2))
-                    }
-                  }
-              }
-
-          if (isUB) Some(allBases)
-          else None
-      }
+          Cliques.Family.cliqueMerge(bases, mubWithZero)(areUnbiased(_, _))
+            .map { mubF =>
+              mubF.map { case (b, i) => toFull(b, i) }
+            }
+        }
+    }
 
     /**
      * Generate all standard bases, then all sets of unbiased standard vectors.
@@ -577,18 +604,21 @@ object VectorSpace {
               //
               // these are as cheap to compute as iterate so don't keep them
               // in memory
-              chooseN(cnt, bases.flatMap(_.cliques.toList))
-                .flatMap { hs =>
-                  ubv
-                    .cliques
-                    .flatMap { mub =>
-                      transformStdBasis(hs, mub, ubBitSet)
-                    }
+              Cliques.Family.chooseN(cnt, bases)
+                .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
+                  transformStdBasis(hs, ubv, ubBitSet)
                 }
-                .toList
             }
           }
-          .map(_.flatten)
+          .map { listListFam: List[List[Mubs]] =>
+            val allMubs: List[Mubs] = listListFam.flatten
+            // Mubs = Family[List[Int]]
+            // this may not be right
+            for {
+              mub <- allMubs
+              basis <- mub.cliques
+            } yield basis
+          }
         }
 
         allBasesFuture(orthSet).zip(mubs)

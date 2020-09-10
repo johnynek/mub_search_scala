@@ -5,6 +5,7 @@ import java.util.concurrent.Executors
 import org.scalacheck.Prop.forAll
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Gen, Prop}
+import org.typelevel.paiges.Doc
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 
@@ -150,6 +151,21 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     forAll(matchLaw(4, 10)(_))
   }
 
+  implicit def listOrd[A: Ordering]: Ordering[List[A]] =
+    new Ordering[List[A]] {
+      @annotation.tailrec
+      final def compare(left: List[A], right: List[A]): Int =
+        (left, right) match {
+          case (Nil, Nil) => 0
+          case (Nil, _) => -1
+          case (_ :: _, Nil) => 1
+          case (lh :: lt, rh :: rt) =>
+            val c = Ordering[A].compare(lh, rh)
+            if (c == 0) compare(lt, rt)
+            else c
+        }
+    }
+
   property("cliqueMerge matches a naive crossproduct + filter") {
     val pair =
       Gen.choose(0, 3)
@@ -162,21 +178,6 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     forAll(pair, mergeFn) { case ((cl0, cl1), fn) =>
       val cl01 = Cliques.Family.cliqueMerge(cl0, cl1)(fn)
-
-      implicit def listOrd[A: Ordering]: Ordering[List[A]] =
-        new Ordering[List[A]] {
-          @annotation.tailrec
-          final def compare(left: List[A], right: List[A]): Int =
-            (left, right) match {
-              case (Nil, Nil) => 0
-              case (Nil, _) => -1
-              case (_ :: _, Nil) => 1
-              case (lh :: lt, rh :: rt) =>
-                val c = Ordering[A].compare(lh, rh)
-                if (c == 0) compare(lt, rt)
-                else c
-            }
-        }
 
       val naive: List[List[(Boolean, Boolean)]] =
         (for {
@@ -191,6 +192,82 @@ class CliqueLaws extends munit.ScalaCheckSuite {
           .map(_.sorted).sorted
 
       assert(fancy == naive, s"$fancy\n\n!=\n\n$naive\n\n($cl01)")
+    }
+  }
+
+  def cross[A](as: List[List[A]]): List[List[A]] =
+    as match {
+      case Nil => Nil :: Nil
+      case h :: rest =>
+        for {
+          head <- h
+          tail <- cross(rest)
+        } yield head :: tail
+    }
+
+  def crossSimple[A](as: Cliques.Family[Cliques.Family[A]]): List[List[List[A]]] =
+    as.cliques
+      .toList
+      .flatMap { listFam: List[Cliques.Family[A]] =>
+        // make the full cross-product
+        val expanded: List[List[List[A]]] =
+          listFam.map(_.cliques.toList)
+
+        cross(expanded)
+      }
+
+  def sort3[A: Ordering](s: List[List[List[A]]]): List[List[List[A]]] =
+    s.map(_.map(_.sorted).sorted).sorted
+
+  test("crossSimple is simple") {
+    val twoBits = Cliques.Family.chooseN(2, List(true, false))
+    val fourBits = Cliques.Family.chooseN(2, twoBits)
+
+    assert(cross(List(List(1), List(2))) == List(List(1, 2)))
+    assert(cross(List(List(1, 2), List(3, 4))) == List(List(1, 3), List(1, 4), List(2, 3), List(2, 4)))
+    assert(cross(List(List(1, 2), List(3, 4, 5))) == List(List(1, 3), List(1, 4), List(1, 5), List(2, 3), List(2, 4), List(2, 5)))
+    assert(cross(List(List(1, 2), List(3, 4), List(5))) == List(List(1, 3, 5), List(1, 4, 5), List(2, 3, 5), List(2, 4, 5)))
+
+
+    val fourCross = fourBits.flatMap(crossSimple(_))
+
+    assert(sort3(fourCross) == sort3(List(
+      List(List(true, true), List(true, true)),
+      List(List(true, true), List(true, false)),
+      List(List(true, true), List(false, true)),
+      List(List(true, true), List(false, false)),
+      List(List(true, false), List(true, true)),
+      List(List(true, false), List(true, false)),
+      List(List(true, false), List(false, true)),
+      List(List(true, false), List(false, false)),
+      List(List(false, true), List(true, true)),
+      List(List(false, true), List(true, false)),
+      List(List(false, true), List(false, true)),
+      List(List(false, true), List(false, false)),
+      List(List(false, false), List(true, true)),
+      List(List(false, false), List(true, false)),
+      List(List(false, false), List(false, true)),
+      List(List(false, false), List(false, false)))))
+  }
+
+  property("crossProduct is lawful") {
+    val genC1 =
+      Gen.zip(Gen.choose(0, 3), Gen.choose(0, 3))
+        .flatMap { case (s1, s2) =>
+          val genC0 = genCliqueFamily(s1, Gen.oneOf(true, false), Gen.choose(1, 4))
+          genCliqueFamily(s2, genC0, Gen.choose(1, 4))
+        }
+
+    forAll(genC1) { ff =>
+      val ll0: List[List[List[Boolean]]] =
+        Cliques.Family.crossProduct(ff).flatMap(_.cliques).toList
+
+      val ll1: List[List[List[Boolean]]] =
+        crossSimple(ff)
+
+      val left = sort3(ll0)
+      val right = sort3(ll1)
+      assert(left == right, s"$left != $right")
     }
   }
 }

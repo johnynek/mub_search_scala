@@ -4,6 +4,7 @@ import cats.{Eval, Traverse}
 import cats.data.NonEmptyList
 import scala.reflect.ClassTag
 import scala.concurrent.{ExecutionContext, Future}
+import org.typelevel.paiges.Doc
 
 import cats.implicits._
 
@@ -24,6 +25,10 @@ object Cliques {
     def filter(fn: A => Boolean): Option[Family[A]]
 
     def map[B](fn: A => B): Family[B]
+
+    def toDoc: Doc
+
+    override def toString = toDoc.renderTrim(80)
   }
   object Family {
     final case object Empty extends Family[Nothing] {
@@ -33,6 +38,7 @@ object Cliques {
       def cliqueCount: Long = 1L
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
       def map[B](fn: Nothing => B): Family[B] = this
+      def toDoc = Doc.text("{}")
     }
     // invariants:
     // 1. all items in tails have the same cliqueSize
@@ -53,6 +59,16 @@ object Cliques {
 
       def map[B](fn: A => B): Family[B] =
         NonEmpty(fn(head), tails.map(_.map(fn)))
+
+      def toDoc = {
+        val tdoc = tails.toList.map(_.toDoc)
+
+        val children = Doc.intercalate(Doc.comma + Doc.lineOrSpace, tdoc).nested(2)
+
+        Doc.char('{') + (Doc.space + Doc.text(head.toString) + Doc.lineOrSpace + Doc.char(':') +
+          Doc.lineOrSpace + (Doc.char('[') + Doc.lineOrSpace + children + Doc.lineOrSpace + Doc.char(']')).nested(2)).nested(2) +
+          Doc.char('}')
+      }
     }
 
     def chooseN[A](n: Int, items: List[A]): List[Family[A]] =
@@ -98,13 +114,14 @@ object Cliques {
           fa match {
             case Empty => G.pure(Empty)
             case NonEmpty(a, rest) =>
-              (f(a), rest.traverse { fam => traverse(fam)(f) })
+              (f(a), rest.traverse(traverse(_)(f)))
                 .mapN(NonEmpty(_, _))
           }
         }
 
       // this is like a clique from two cliques
       def cliqueMerge[A, B, C](fa: Family[A], fb: Family[B])(fn: ((A, B), (A, B)) => Boolean): Option[Family[(A, B)]] = {
+
         def loop(outer: List[(A, B)], fa: Family[A], fb: Family[B]): Option[Family[(A, B)]] =
           (fa, fb) match {
             case (Empty, Empty) => Some(Empty)
@@ -133,6 +150,26 @@ object Cliques {
           }
 
         loop(Nil, fa, fb)
+      }
+
+    /**
+     * See the law in the tests, but this:
+     * crossProduct(ff).flatMap(_.cliques).toList
+     *
+     * should create the same set as fully expanding
+     * the families
+     */
+    def crossProduct[A](f2: Family[Family[A]]): LazyList[Family[List[A]]] =
+      f2 match {
+        case Empty => LazyList(Empty)
+        case NonEmpty(fa, rest) =>
+          val restWork = rest.toList.to(LazyList).map(crossProduct(_))
+          for {
+            first <- fa.cliques
+            tails <- restWork
+            // we know restWork.nonEmpty since it was from a result from crossProduct
+            tailNEL = NonEmptyList.fromListUnsafe(tails.toList)
+          } yield NonEmpty(first, tailNEL)
       }
   }
 
