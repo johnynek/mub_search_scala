@@ -854,7 +854,7 @@ object VectorSpace {
     finally data.close()
   }
 
-  def search[N <: Nat, C](
+  def search0[N <: Nat, C](
     space: Space[N, C],
     orthSet: BitSet,
     mubSet: BitSet,
@@ -886,6 +886,55 @@ object VectorSpace {
           }
         }
       }
+  }
+
+  def search[N <: Nat, C](
+    space: Space[N, C],
+    orthSet: BitSet,
+    mubSet: BitSet,
+    mubs: Int,
+    limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
+
+    val pOrth = orthSet.cardinality.toDouble / space.standardCount
+    val pUb = mubSet.cardinality.toDouble / space.standardCount
+
+    val cp = space.conjProdInt
+    val isOrth: () => (Int, Int) => Boolean = {
+      () =>
+        val conjP = cp()
+
+        { (a, b) => orthSet.get(conjP(a, b)) }
+    }
+
+    val isUB: () => (Int, Int) => Boolean = {
+      () =>
+        val conjP = cp()
+
+        { (a, b) => mubSet.get(conjP(a, b)) }
+    }
+
+    val nextFn: Int => Option[Int] =
+      { i0 =>
+        val i1 = i0 + 1
+        if (i1 < space.standardCount) Some(i1)
+        else None
+      }
+
+
+    Future {
+      println(s"# $space")
+      println(s"pOrth = $pOrth, pUb = $pUb")
+      val mubBuild = new MubBuild.Instance(
+        space.dim,
+        mubs,
+        isOrth,
+        isUB,
+        nextFn,
+        pOrth,
+        pUb)
+
+      println(s"found: ${mubBuild.firstCompleteExample}")
+    }
   }
 
 
