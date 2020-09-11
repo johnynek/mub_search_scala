@@ -45,9 +45,9 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     loop(0)
   }
 
-  test("eps = 2 d sin(pi/n) when n > 1, else 2d") {
+  test("eps = 2 (d - 1) sin(pi/n) when n > 1, else (d - 1)") {
     val expectedEps =
-      Real(2 * dim) * Real.sin(Real.pi / space.C.roots.length)
+      Real(2 * (dim - 1)) * Real.sin(Real.pi / space.C.roots.length)
     assert(space.eps == expectedEps, s"${space.eps} != $expectedEps")
   }
 
@@ -391,8 +391,12 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       Gen.choose(0, Int.MaxValue)
         .map { i => expITheta(Real(i) * Real.pi * Real.two / Real(Int.MaxValue)) }
 
-    def genVec(d: Int): Gen[List[Complex[Real]]] =
-      Gen.listOfN(d, genRoot)
+    def genVec(d: Int): Gen[List[Complex[Real]]] = {
+      val one = Complex(Real.one, Real.zero)
+      // make sure one item is always 1
+      Gen.listOfN(d - 1, genRoot)
+        .map(one :: _)
+    }
 
     val genExample: Gen[Example] =
       for {

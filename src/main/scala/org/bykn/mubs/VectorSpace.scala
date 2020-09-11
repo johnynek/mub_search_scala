@@ -77,6 +77,11 @@ object VectorSpace {
 
     /**
      * This is 2d * sin(pi/n) when n>1, else 2d
+     * we use d' = d - 1 because we can always
+     * standardize the original vectors to have
+     * 1 as the last element. 1 is a root of
+     * unity, so there is no difference on that
+     * axis
      */
     val eps: Real = {
       // theta = 2 pi / n
@@ -85,11 +90,11 @@ object VectorSpace {
       // sin(theta/2) = ((1 - cos(theta))/2).sqrt
       // 2d sin(theta/2) = 2d((1 - re(C.omega))/2).sqrt
 
-      val twoD = Real(2 * dim)
+      val dMinus1 = Real(dim - 1)
 
-      if (nroots == 1) twoD
+      if (nroots == 1) dMinus1
       else {
-        twoD * (((Real.one - C.reOmega)/Real.two).sqrt)
+        Real.two * dMinus1 * (((Real.one - C.reOmega)/Real.two).sqrt)
       }
     }
 
@@ -126,7 +131,7 @@ object VectorSpace {
     //if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)
     def quantizationBoundGap(v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
       require(v1.length == v2.length)
-      require(v1.length == dim)
+      require(v1.length == (dim - 1))
 
       val exact = innerAbs2(v1, v2).sqrt
       val quant = innerAbs2(quantize(v1), quantize(v2)).sqrt
@@ -901,7 +906,7 @@ object VectorSpace {
       }
 
       def nextV(): List[Complex[Real]] =
-        (0 until space.dim)
+        (0 until (space.dim - 1))
           .iterator
           .map { _ => nextC() }
           .toList
