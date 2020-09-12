@@ -2,6 +2,7 @@ package org.bykn.mubs
 
 import cats.data.OneAnd
 import java.util.BitSet
+import scala.collection.immutable.SortedSet
 /**
  * The approach of MUB build is to build a tree
  * of extensions to the empty set such that each
@@ -19,20 +20,86 @@ object MubBuild {
     final case class NonEmpty[F[_], A](root: A, children: F[NonEmpty[F, A]]) extends Tree[F, A]
   }
 
+  /*
+   * For each basis (key) we have the current set of values
+   * and all possible extensions
+   */
+  type Bases = Map[Int, (List[Int], SortedSet[Int])]
+
   class Instance(
     val dim: Int,
+    val standardCount: Int,
     val goalHads: Int,
-    isOrth: () => (Int, Int) => Boolean,
-    isUB: () => (Int, Int) => Boolean,
-    next: Int => Option[Int],
-    pOrth: Double,
-    pUb: Double) {
+    cp: () => (Int, Int) => Int,
+    orthBitSet: BitSet,
+    ubBitSet: BitSet,
+    next: Int => Option[Int]) {
 
     import scala.math.pow
 
+    val pOrth = orthBitSet.cardinality.toDouble / standardCount
+    val pUb = ubBitSet.cardinality.toDouble / standardCount
+
+    println(s"pOrth = $pOrth, pUb = $pUb")
+
+    private[this] val cpFn = cp()
+    def orthFn(i: Int, j: Int): Boolean =
+      orthBitSet.get(cpFn(i, j))
+
+    def unbiasedFn(i: Int, j: Int): Boolean =
+      ubBitSet.get(cpFn(i, j))
+
+    // all vectors ABOVE init (init is not included)
+    // 0 is safe because we start building with 0
+    // included
+    def allVectorsFrom(init: Int): LazyList[Int] =
+      LazyList.iterate(next(init))(_.flatMap(next))
+        .takeWhile(_.isDefined)
+        .map(_.get)
+
+    def bitSetToSet(bitset: BitSet): SortedSet[Int] = {
+      var idx = bitset.nextSetBit(0)
+      val bldr = SortedSet.newBuilder[Int]
+      while ((idx < standardCount) && (idx >= 0)) {
+        bldr += idx
+        idx = bitset.nextSetBit(idx + 1)
+      }
+      bldr.result()
+    }
+
+    val orthToZero: SortedSet[Int] = bitSetToSet(orthBitSet)
+    val ubToZero: SortedSet[Int] = bitSetToSet(ubBitSet)
+
+    def forBasis(bases: Bases, i: Int): List[Int] =
+      bases(i)._1
+
+    def addVector(bases: Bases, i: Int, vec: Int): Bases =
+      //
+      // TODO: we are maintaining the sorted MUB
+      // requirement, which is causing us to
+      // search equivalent orders many times (especially
+      // for larger MUBs). We should augment
+      // the filters here to enforce that
+      // items are sorted
+      bases
+        .iterator
+        .map {
+          case (basis, (vecs, s)) =>
+            if (basis == i) {
+              val s1 = s
+                .filter(orthFn(vec, _))
+              (basis, (vec :: vecs, s1))
+            }
+            else {
+              val s1 = s
+                .filter(unbiasedFn(vec, _))
+              (basis, (vecs, s1))
+            }
+        }
+        .toMap
+
     private[this] val hads = (0 until goalHads).toList
 
-    type Bases = Map[Int, List[Int]]
     type TreeB = Tree[LazyList, Bases]
 
     def firstComplete(b: TreeB): Option[Bases] =
@@ -46,46 +113,15 @@ object MubBuild {
     // this is true, we found a complete set, we might as well stop
     def isComplete(b: Bases): Boolean =
       hads.forall { basis =>
-        b.get(basis) match {
-          case Some(l) => l.length == dim
-          case None => false
-        }
+        forBasis(b, basis).length == dim
       }
 
-    def extensionProb(b: Bases, i: Int): Double = {
-
-      val orthVectors: Int = b.getOrElse(i, Nil).length
-      val res =
-        if (orthVectors == dim) 0.0
-        else if ((i > 0) && (b.getOrElse(i - 1, Nil).isEmpty)) {
-          // assembly bases in order
-          0.0
-        }
-        else {
-          val unbiasedVectors: Int =
-            b.iterator.map {
-              case (basis, vecs) if basis != i => vecs.length
-              case _ => 0
-            }
-            .sum
-          pow(pOrth, orthVectors) * pow(pUb, unbiasedVectors)
-        }
-
-      //println(s"extension prob = $b -> $i = $res")
-      res
-    }
-
-    // all vectors ABOVE init (init is not included)
-    // 0 is safe because we start building with 0
-    // included
-    def allVectorsFrom(init: Int): LazyList[Int] =
-      LazyList.iterate(next(init))(_.flatMap(next))
-        .takeWhile(_.isDefined)
-        .map(_.get)
+    def extensionSize(b: Bases, i: Int): Int =
+      b(i)._2.size
 
     // fully extend an incomplete basis
     private def extendBasis(b: Bases, i: Int): Option[TreeB] = {
-      val orthVectors: List[Int] = b.getOrElse(i, Nil)
+      val orthVectors: List[Int] = forBasis(b, i)
 
       if (orthVectors.length == dim) {
         // we know this isn't complete and can't be
@@ -93,63 +129,14 @@ object MubBuild {
         None
       }
       else {
-        val unbiasedVectors: List[Int] =
-          b.iterator.flatMap {
-            case (basis, vecs) if basis != i => vecs
-            case _ => List.empty
-          }
-          .toList
-
-        val orthFn = isOrth()
-        val unbiasedFn = isUB()
-
-        // we can always go build
-        // the basis in a sorted order
-        // so, the vec has to be greater than all
-        // items in the vector currently
-        //
-        // similarly, we can sort the mubs,
-        val lowerBound: Int = {
-          val lowestVec: Int = 0
-
-          val unbiasedLB: Int =
-            if (i > 0) {
-              // don't build on a basis unless
-              // the previous exists and
-              // the vector is greater than the smallest
-              // vector in the previous
-              val prevBasis = b.getOrElse(i - 1, Nil)
-              prevBasis.lastOption match {
-                case None => Int.MaxValue
-                case Some(lb) => lb
-              }
-            }
-          else lowestVec
-
-          val orthLB: Int =
-            orthVectors.headOption.getOrElse(lowestVec)
-
-          math.max(unbiasedLB, orthLB)
-        }
+        val choices = b(i)._2.to(LazyList)
 
         def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] = {
-
-          val keep =
-            unbiasedVectors.forall(unbiasedFn(_, vec)) &&
-              orthVectors.forall(orthFn(_, vec))
-
-          if (keep) {
-            val nextBases = {
-              val initVs = b.getOrElse(i, Nil)
-              b.updated(i, vec :: initVs)
-            }
-
-            extendFully(nextBases)
-          }
-          else None
+          val nextBases = addVector(b, i, vec)
+          extendFully(nextBases)
         }
 
-        val children = allVectorsFrom(lowerBound).flatMap(extension(_))
+        val children = choices.flatMap(extension(_))
         if (children.isEmpty) None
         else Some(Tree.NonEmpty(b, children))
       }
@@ -162,7 +149,7 @@ object MubBuild {
         // we might as well try to find the most probable
         // first
         val greatestToLeast =
-          hads.sortBy(extensionProb(b, _)).reverse
+          hads.sortBy(extensionSize(b, _)).reverse
 
         val children = greatestToLeast
           .to(LazyList)
@@ -176,7 +163,12 @@ object MubBuild {
       }
     }
 
-    val initBasis: Bases = Map((0, 0 :: Nil))
+    val initBasis: Bases =
+      hads.map {
+        case 0 => (0, (0 :: Nil, orthToZero))
+        case i => (i, (Nil, ubToZero))
+      }
+      .toMap
 
     lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis)
 

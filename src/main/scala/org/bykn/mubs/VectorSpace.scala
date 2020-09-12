@@ -895,23 +895,7 @@ object VectorSpace {
     mubs: Int,
     limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
 
-    val pOrth = orthSet.cardinality.toDouble / space.standardCount
-    val pUb = mubSet.cardinality.toDouble / space.standardCount
-
     val cp = space.conjProdInt
-    val isOrth: () => (Int, Int) => Boolean = {
-      () =>
-        val conjP = cp()
-
-        { (a, b) => orthSet.get(conjP(a, b)) }
-    }
-
-    val isUB: () => (Int, Int) => Boolean = {
-      () =>
-        val conjP = cp()
-
-        { (a, b) => mubSet.get(conjP(a, b)) }
-    }
 
     val nextFn: Int => Option[Int] =
       { i0 =>
@@ -920,18 +904,16 @@ object VectorSpace {
         else None
       }
 
-
     Future {
       println(s"# $space")
-      println(s"pOrth = $pOrth, pUb = $pUb")
       val mubBuild = new MubBuild.Instance(
         space.dim,
+        space.standardCount,
         mubs,
-        isOrth,
-        isUB,
-        nextFn,
-        pOrth,
-        pUb)
+        cp,
+        orthSet,
+        mubSet,
+        nextFn)
 
       println(s"found: ${mubBuild.firstCompleteExample}")
     }
