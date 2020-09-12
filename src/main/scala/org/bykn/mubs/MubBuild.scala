@@ -148,7 +148,8 @@ object MubBuild {
         None
       }
       else {
-        val choices = b(i)._2.to(LazyList)
+        // make this a def so the head can be GCe'd below
+        def choices = b(i)._2.to(LazyList)
 
         def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] =
           addVector(b, i, vec).flatMap(extendFully)
