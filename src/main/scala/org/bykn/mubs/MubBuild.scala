@@ -3,6 +3,9 @@ package org.bykn.mubs
 import cats.data.OneAnd
 import java.util.BitSet
 import scala.collection.immutable.SortedSet
+
+import cats.implicits._
+
 /**
  * The approach of MUB build is to build a tree
  * of extensions to the empty set such that each
@@ -73,30 +76,46 @@ object MubBuild {
     def forBasis(bases: Bases, i: Int): List[Int] =
       bases(i)._1
 
-    def addVector(bases: Bases, i: Int, vec: Int): Bases =
+    def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] =
       //
-      // TODO: we are maintaining the sorted MUB
+      // TODO: we are not maintaining the sorted MUB
       // requirement, which is causing us to
       // search equivalent orders many times (especially
       // for larger MUBs). We should augment
       // the filters here to enforce that
       // items are sorted
       bases
-        .iterator
-        .map {
+        .toList
+        .traverse {
           case (basis, (vecs, s)) =>
             if (basis == i) {
-              val s1 = s
-                .filter(orthFn(vec, _))
-              (basis, (vec :: vecs, s1))
+              val s1 = s.filter { v0 =>
+                // we add in sorted order
+                (v0 > vec) && orthFn(vec, v0)
+              }
+              val v1 = vec :: vecs
+
+              if ((s1.size + v1.length) < dim) {
+                // we can't reach a complete set
+                None
+              }
+              else {
+                Some((basis, (v1, s1)))
+              }
             }
             else {
-              val s1 = s
-                .filter(unbiasedFn(vec, _))
-              (basis, (vecs, s1))
+              val s1 = s.filter(unbiasedFn(vec, _))
+
+              if ((s1.size + vecs.length) < dim) {
+                // we can't reach a complete set
+                None
+              }
+              else {
+                Some((basis, (vecs, s1)))
+              }
             }
         }
-        .toMap
+        .map(_.toMap)
 
     private[this] val hads = (0 until goalHads).toList
 
@@ -131,10 +150,8 @@ object MubBuild {
       else {
         val choices = b(i)._2.to(LazyList)
 
-        def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] = {
-          val nextBases = addVector(b, i, vec)
-          extendFully(nextBases)
-        }
+        def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] =
+          addVector(b, i, vec).flatMap(extendFully)
 
         val children = choices.flatMap(extension(_))
         if (children.isEmpty) None
