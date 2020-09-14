@@ -1,16 +1,14 @@
 package org.bykn.mubs
 
 import spire.math.{Complex, Real}
-import shapeless.ops.nat
-import shapeless.Nat
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
 
-abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C], nToInt: nat.ToInt[N]) extends munit.ScalaCheckSuite {
+abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic: Cyclotomic[N, C], N: BinNat.FromType[N]) extends munit.ScalaCheckSuite {
 
-  def depth: String = nToInt().toString + " " + getClass.getName
+  def depth: String = N.value.toString + " " + getClass.getName
 
-  val twoM: Int = 1 << nToInt()
+  val twoM: Int = N.value.toBigInt.toInt
 
   lazy val gen: Gen[C] = {
     val rec = Gen.lzy(gen)
@@ -149,15 +147,14 @@ abstract class CyclotomicLaws[N <: Nat, C](implicit cyclotomic: Cyclotomic[N, C]
   }
 }
 
-class CyclotomicLaws0 extends CyclotomicLaws[Cyclotomic.N0, Cyclotomic.C0]
-class CyclotomicLaws1 extends CyclotomicLaws[Cyclotomic.N1, Cyclotomic.C1]
-class CyclotomicLaws2 extends CyclotomicLaws[Cyclotomic.N2, Cyclotomic.C2]
-class CyclotomicLaws3 extends CyclotomicLaws[Cyclotomic.N3, Cyclotomic.C3]
-class CyclotomicLaws4 extends CyclotomicLaws[Cyclotomic.N4, Cyclotomic.C4]
-class CyclotomicLaws5 extends CyclotomicLaws[Cyclotomic.N5, Cyclotomic.C5]
+class CyclotomicLaws2 extends CyclotomicLaws[BinNat._2, Cyclotomic.C2]
+class CyclotomicLaws4 extends CyclotomicLaws[BinNat._4, Cyclotomic.C4]
+class CyclotomicLaws8 extends CyclotomicLaws[BinNat._8, Cyclotomic.C8]
+class CyclotomicLaws16 extends CyclotomicLaws[BinNat._16, Cyclotomic.C16]
+class CyclotomicLaws32 extends CyclotomicLaws[BinNat._32, Cyclotomic.C32]
 
-class CyclotomicLawsL1 extends CyclotomicLaws[Cyclotomic.N1, Cyclotomic.L1]
-class CyclotomicLawsL2 extends CyclotomicLaws[Cyclotomic.N2, Cyclotomic.L2]
-class CyclotomicLawsL3 extends CyclotomicLaws[Cyclotomic.N3, Cyclotomic.L3]
-class CyclotomicLawsL4 extends CyclotomicLaws[Cyclotomic.N4, Cyclotomic.L4]
-class CyclotomicLawsL5 extends CyclotomicLaws[Cyclotomic.N5, Cyclotomic.L5]
+class CyclotomicLawsL2 extends CyclotomicLaws[BinNat._2, Cyclotomic.L2]
+class CyclotomicLawsL4 extends CyclotomicLaws[BinNat._4, Cyclotomic.L4]
+class CyclotomicLawsL8 extends CyclotomicLaws[BinNat._8, Cyclotomic.L8]
+class CyclotomicLawsL16 extends CyclotomicLaws[BinNat._16, Cyclotomic.L16]
+class CyclotomicLawsL32 extends CyclotomicLaws[BinNat._32, Cyclotomic.L32]

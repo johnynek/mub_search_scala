@@ -13,8 +13,6 @@ import java.nio.file.Path
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
-import shapeless.ops.nat.ToInt
-import shapeless.{Nat}
 import spire.math.{SafeLong, Complex, Real}
 
 import cats.implicits._
@@ -52,7 +50,7 @@ import cats.implicits._
 object VectorSpace {
 
   // realBits is how many real bits to compute
-  class Space[N <: Nat, C: ClassTag](val dim: Int, realBits: Int)(implicit val C: Cyclotomic[N, C]) {
+  class Space[N <: BinNat, C: ClassTag](val dim: Int, realBits: Int)(implicit val C: Cyclotomic[N, C]) {
 
     // the total possible set of hadamard vectors is
     // (2^N)^d
@@ -733,7 +731,7 @@ object VectorSpace {
     loop(items, Nil)
   }
 
-  final def runInfo[N <: Nat, C](
+  final def runInfo[N <: BinNat, C](
     space: Space[N, C],
     bases: Option[BitSet],
     runSync: Boolean,
@@ -787,7 +785,7 @@ object VectorSpace {
     f1.zip(f2).map(_ => ())
   }
 
-  def writeTable[N <: Nat, C](
+  def writeTable[N <: BinNat, C](
     space: Space[N, C],
     isOrthTable: Boolean,
     dos: DataOutputStream)(implicit ec: ExecutionContext): Future[Unit] = {
@@ -816,7 +814,7 @@ object VectorSpace {
       }
   }
 
-  def readTable[N <: Nat, C](
+  def readTable[N <: BinNat, C](
     space: Space[N, C],
     isOrthTable: Boolean,
     ios: DataInputStream): BitSet = {
@@ -845,7 +843,7 @@ object VectorSpace {
     bitset
   }
 
-  def readPath[N <: Nat, C](space: Space[N, C], isOrth: Boolean, path: Path): BitSet = {
+  def readPath[N <: BinNat, C](space: Space[N, C], isOrth: Boolean, path: Path): BitSet = {
     val input = new FileInputStream(path.toFile)
     val gz = new GZIPInputStream(input)
     val data = new DataInputStream(gz)
@@ -854,7 +852,7 @@ object VectorSpace {
     finally data.close()
   }
 
-  def search0[N <: Nat, C](
+  def search0[N <: BinNat, C](
     space: Space[N, C],
     orthSet: BitSet,
     mubSet: BitSet,
@@ -888,7 +886,7 @@ object VectorSpace {
       }
   }
 
-  def search[N <: Nat, C](
+  def search[N <: BinNat, C](
     space: Space[N, C],
     orthSet: BitSet,
     mubSet: BitSet,
@@ -920,7 +918,7 @@ object VectorSpace {
   }
 
 
-  def quantBoundSearch[N <: Nat, C](
+  def quantBoundSearch[N <: BinNat, C](
     space: Space[N, C],
     seed: Long,
     trials: Int)(implicit ec: ExecutionContext): Future[Unit] = {
@@ -995,22 +993,21 @@ object SearchApp extends CommandApp(
           }
         }
 
-    val depth = Opts.option[Int]("depth", "we use 2^depth roots of unity")
+    val root = Opts.option[Int]("root", "what root of unity")
       .mapValidated { d =>
 
-        if ((0 <= d) && (d <= 7)) Validated.valid {
+        val validSizes: Set[Int] = Set(2, 4, 8, 16, 32)
+
+        if (validSizes(d)) Validated.valid {
           d match {
-            case 0 => { (d: Int, bits: Int) => new Space[Cyclotomic.N0, Cyclotomic.C0](d, bits) }
-            case 1 => { (d: Int, bits: Int) => new Space[Cyclotomic.N1, Cyclotomic.L1](d, bits) }
-            case 2 => { (d: Int, bits: Int) => new Space[Cyclotomic.N2, Cyclotomic.L2](d, bits) }
-            case 3 => { (d: Int, bits: Int) => new Space[Cyclotomic.N3, Cyclotomic.L3](d, bits) }
-            case 4 => { (d: Int, bits: Int) => new Space[Cyclotomic.N4, Cyclotomic.L4](d, bits) }
-            case 5 => { (d: Int, bits: Int) => new Space[Cyclotomic.N5, Cyclotomic.L5](d, bits) }
-            case 6 => { (d: Int, bits: Int) => new Space[Cyclotomic.N6, Cyclotomic.L6](d, bits) }
-            case 7 => { (d: Int, bits: Int) => new Space[Cyclotomic.N7, Cyclotomic.L7](d, bits) }
+            case 2 => { (d: Int, bits: Int) => new Space[BinNat._2, Cyclotomic.L2](d, bits) }
+            case 4 => { (d: Int, bits: Int) => new Space[BinNat._4, Cyclotomic.L4](d, bits) }
+            case 8 => { (d: Int, bits: Int) => new Space[BinNat._8, Cyclotomic.L8](d, bits) }
+            case 16 => { (d: Int, bits: Int) => new Space[BinNat._16, Cyclotomic.L16](d, bits) }
+            case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
           }
         }
-        else Validated.invalidNel(s"invalid depth: $d")
+        else Validated.invalidNel(s"invalid root: $d. valid values: ${validSizes.toList.sorted}")
       }
 
     val orthTab = Opts.option[Path]("orth_tab", "path to orthogonality table")
@@ -1020,7 +1017,7 @@ object SearchApp extends CommandApp(
     val spaceOpt =
       realBits
         .product(dim)
-        .product(depth)
+        .product(root)
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =

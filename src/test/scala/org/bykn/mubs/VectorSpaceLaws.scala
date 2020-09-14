@@ -4,7 +4,6 @@ import algebra.ring.Ring
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
-import shapeless.Nat
 import spire.math.{Complex, Real}
 
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
@@ -15,7 +14,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
   val dim = 6
 
-  val space = new VectorSpace.Space[Cyclotomic.N3, Cyclotomic.L3](dim, 20)
+  val space = new VectorSpace.Space[BinNat._8, Cyclotomic.L8](dim, 20)
 
   val genInt: Gen[Int] =
     Gen.choose(0, space.standardCount - 1)
@@ -152,7 +151,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   /**
    * Some tests with smaller spaces that we can afford to examine
    */
-  val space2 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](2, 20)
+  val space2 = new VectorSpace.Space[BinNat._32, Cyclotomic.L32](2, 20)
 
   test("allMubVectors are all unbiased to each other and 0") {
     val ubBitSet = space2.buildCache(space2.isUnbiased)
@@ -305,7 +304,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   }
 
   test("Space detects standard d=3 mubs with n=32") {
-    val space5 = new VectorSpace.Space[Cyclotomic.N5, Cyclotomic.L5](3, 20)
+    val space5 = new VectorSpace.Space[BinNat._32, Cyclotomic.L32](3, 20)
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
       VectorSpace.allDistinctPairs(basis)
         .forall { case (v1, v2) =>
@@ -419,7 +418,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   test("we can round-trip tables") {
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
-    def law[N <: Nat, C](space: VectorSpace.Space[N, C], isOrth: Boolean) = {
+    def law[N <: BinNat, C](space: VectorSpace.Space[N, C], isOrth: Boolean) = {
       val baos = new ByteArrayOutputStream()
       val output = new DataOutputStream(baos)
 
