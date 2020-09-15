@@ -893,13 +893,6 @@ object VectorSpace {
     mubs: Int,
     limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
 
-    val nextFn: Int => Option[Int] =
-      { i0 =>
-        val i1 = i0 + 1
-        if (i1 < space.standardCount) Some(i1)
-        else None
-      }
-
     Future {
       println(s"# $space")
       val mubBuild = new MubBuild.Instance(
@@ -908,8 +901,7 @@ object VectorSpace {
         mubs,
         space.conjProdInt _,
         orthSet,
-        mubSet,
-        nextFn)
+        mubSet)
 
       println(s"found: ${mubBuild.firstCompleteExample}")
     }

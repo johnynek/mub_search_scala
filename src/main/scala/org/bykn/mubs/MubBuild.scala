@@ -35,8 +35,7 @@ object MubBuild {
     val goalHads: Int,
     cpFn: (Int, Int) => Int,
     orthBitSet: BitSet,
-    ubBitSet: BitSet,
-    next: Int => Option[Int]) {
+    ubBitSet: BitSet) {
 
     import scala.math.pow
 
@@ -50,14 +49,6 @@ object MubBuild {
 
     def unbiasedFn(i: Int, j: Int): Boolean =
       ubBitSet.get(cpFn(i, j))
-
-    // all vectors ABOVE init (init is not included)
-    // 0 is safe because we start building with 0
-    // included
-    def allVectorsFrom(init: Int): LazyList[Int] =
-      LazyList.iterate(next(init))(_.flatMap(next))
-        .takeWhile(_.isDefined)
-        .map(_.get)
 
     def bitSetToSet(bitset: BitSet): SortedSet[Int] = {
       var idx = bitset.nextSetBit(0)
@@ -166,6 +157,10 @@ object MubBuild {
 
         def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] =
           addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
+
+        if (depth < 12) {
+          println(s"#depth = $depth, basis = $i, width = $branchWidth")
+        }
 
         val start = System.nanoTime()
         val children = choices.flatMap(extension(_))
