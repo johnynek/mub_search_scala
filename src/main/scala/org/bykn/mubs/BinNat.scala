@@ -243,7 +243,7 @@ object BinNat {
   }
 
   trait Add1 {
-    implicit def addCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: Add.Aux[B2, B1, O]): Add.Aux[B1, B2, O] =
+    implicit def addCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: => Add.Aux[B2, B1, O]): Add.Aux[B1, B2, O] =
       new Add[B1, B2] {
         type Out = O
         def apply(b1: Value[B1], b2: Value[B2]): Value[Out] =
@@ -360,7 +360,7 @@ object BinNat {
   }
 
   trait Mult1 {
-    implicit def multCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: Mult.Aux[B2, B1, O]): Mult.Aux[B1, B2, O] =
+    implicit def multCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: => Mult.Aux[B2, B1, O]): Mult.Aux[B1, B2, O] =
       new Mult[B1, B2] {
         type Out = O
         def apply(v1: Value[B1], v2: Value[B2]): Value[Out] = rev(v2, v1)

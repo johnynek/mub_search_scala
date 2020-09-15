@@ -4,11 +4,12 @@ import spire.math.{Complex, Real}
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
 
-abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic: Cyclotomic[N, C], N: BinNat.FromType[N]) extends munit.ScalaCheckSuite {
+abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomic[N, C]) extends munit.ScalaCheckSuite {
+  lazy val cyclotomic: Cyclotomic[N, C] = cyclotomic0
 
-  def depth: String = N.value.toString + " " + getClass.getName
+  val roots: Int = cyclotomic.roots.length
 
-  val twoM: Int = N.value.toBigInt.toInt
+  def depth: String = roots.toString + " " + getClass.getName
 
   lazy val gen: Gen[C] = {
     val rec = Gen.lzy(gen)
@@ -112,23 +113,23 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic: Cyclotomic[N,
   }
 
   test(s"C$depth omega = cos(2 pi / n) + i sin(2 pi / n)") {
-    val theta = Real.pi * 2 / twoM
-    assert(cyclotomic.reOmega == Real.cos(theta))
+    val theta = Real.pi * Real.two / Real(roots)
+    assert(cyclotomic.reOmega == Real.cos(theta), s"${cyclotomic.reOmega} != ${Real.cos(theta)}")
     assert(cyclotomic.imOmega == Real.sin(theta))
   }
 
   test(s"C$depth omega ^ (2^m) == 1") {
 
-    val shouldBeOne = cyclotomic.pow(cyclotomic.omega, twoM)
+    val shouldBeOne = cyclotomic.pow(cyclotomic.omega, roots)
     assert(shouldBeOne == cyclotomic.one)
 
-    if (twoM > 1) {
-      val shouldBeNOne = cyclotomic.pow(cyclotomic.omega, twoM / 2)
+    if (roots > 1 && (roots % 2 == 0)) {
+      val shouldBeNOne = cyclotomic.pow(cyclotomic.omega, roots / 2)
       assert(shouldBeNOne == cyclotomic.negate(cyclotomic.one))
     }
   }
 
-  if (twoM > 1) {
+  if (roots > 1) {
     test(s"C$depth sum of all roots is 0") {
       val left = cyclotomic.roots.reduce(cyclotomic.plus(_, _))
       assert(left == cyclotomic.zero, cyclotomic.toComplex(left).toString)
@@ -147,14 +148,28 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic: Cyclotomic[N,
   }
 }
 
+class CyclotomicLaws1 extends CyclotomicLaws[BinNat._1, Cyclotomic.C1]
 class CyclotomicLaws2 extends CyclotomicLaws[BinNat._2, Cyclotomic.C2]
+class CyclotomicLaws3 extends CyclotomicLaws[BinNat._3, Cyclotomic.C3]
 class CyclotomicLaws4 extends CyclotomicLaws[BinNat._4, Cyclotomic.C4]
+class CyclotomicLaws6 extends CyclotomicLaws[BinNat._6, Cyclotomic.C6]
 class CyclotomicLaws8 extends CyclotomicLaws[BinNat._8, Cyclotomic.C8]
+class CyclotomicLaws12 extends CyclotomicLaws[BinNat._12, Cyclotomic.C12]
 class CyclotomicLaws16 extends CyclotomicLaws[BinNat._16, Cyclotomic.C16]
+class CyclotomicLaws18 extends CyclotomicLaws[BinNat._18, Cyclotomic.C18]
+class CyclotomicLaws24 extends CyclotomicLaws[BinNat._24, Cyclotomic.C24]
+class CyclotomicLaws27 extends CyclotomicLaws[BinNat._27, Cyclotomic.C27]
 class CyclotomicLaws32 extends CyclotomicLaws[BinNat._32, Cyclotomic.C32]
 
+class CyclotomicLawsL1 extends CyclotomicLaws[BinNat._1, Cyclotomic.L1]
 class CyclotomicLawsL2 extends CyclotomicLaws[BinNat._2, Cyclotomic.L2]
+class CyclotomicLawsL3 extends CyclotomicLaws[BinNat._3, Cyclotomic.L3]
 class CyclotomicLawsL4 extends CyclotomicLaws[BinNat._4, Cyclotomic.L4]
 class CyclotomicLawsL8 extends CyclotomicLaws[BinNat._8, Cyclotomic.L8]
+class CyclotomicLawsL9 extends CyclotomicLaws[BinNat._8, Cyclotomic.L8]
+class CyclotomicLawsL12 extends CyclotomicLaws[BinNat._12, Cyclotomic.L12]
 class CyclotomicLawsL16 extends CyclotomicLaws[BinNat._16, Cyclotomic.L16]
+class CyclotomicLawsL18 extends CyclotomicLaws[BinNat._18, Cyclotomic.L18]
+class CyclotomicLawsL24 extends CyclotomicLaws[BinNat._24, Cyclotomic.L24]
+class CyclotomicLawsL27 extends CyclotomicLaws[BinNat._27, Cyclotomic.L27]
 class CyclotomicLawsL32 extends CyclotomicLaws[BinNat._32, Cyclotomic.L32]
