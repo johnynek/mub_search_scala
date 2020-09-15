@@ -97,7 +97,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     val v1 = new Array[Int](dim)
     val v2 = new Array[Int](dim)
     val v3 = new Array[Int](dim)
-    val cp = space.conjProdInt()
+    val cp = space.conjProdInt _
     forAll(genInt, genInt) { (i1, i2) =>
       space.intToVector(i1, v1)
       space.intToVector(i2, v2)

@@ -33,7 +33,7 @@ object MubBuild {
     val dim: Int,
     val standardCount: Int,
     val goalHads: Int,
-    cp: () => (Int, Int) => Int,
+    cpFn: (Int, Int) => Int,
     orthBitSet: BitSet,
     ubBitSet: BitSet,
     next: Int => Option[Int]) {
@@ -45,7 +45,6 @@ object MubBuild {
 
     println(s"pOrth = $pOrth, pUb = $pUb")
 
-    private[this] val cpFn = cp()
     def orthFn(i: Int, j: Int): Boolean =
       orthBitSet.get(cpFn(i, j))
 
@@ -76,30 +75,42 @@ object MubBuild {
     def forBasis(bases: Bases, i: Int): List[Int] =
       bases(i)._1
 
-    def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] =
-      //
-      // TODO: we are not maintaining the sorted MUB
-      // requirement, which is causing us to
-      // search equivalent orders many times (especially
-      // for larger MUBs). We should augment
-      // the filters here to enforce that
-      // items are sorted
+    def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] = {
+      val basisi = bases(i)._1
+      val mini = if (basisi.isEmpty) vec else basisi.last
+
       bases
         .toList
         .traverse {
           case (basis, (vecs, s)) =>
-            if (basis == i) {
-              val s1 = s.filter { v0 =>
-                // we add in sorted order
-                (v0 > vec) && orthFn(vec, v0)
+            val sortBasis =
+              if (0 < basis) {
+                if (basis < i) {
+                  // the min value of this
+                  // basis has to be <= vec
+                  val bprev = bases(basis - 1)._1
+                  bprev.isEmpty || (bprev.last <= mini)
+                }
+                else if (basis > i) {
+                  val bprev = bases(basis - 1)._1
+                  bprev.isEmpty || (mini <= bprev.last)
+                }
+                else true
               }
-              val v1 = vec :: vecs
+              else true
 
-              if ((s1.size + v1.length) < dim) {
+            if (!sortBasis) None
+            else if (basis == i) {
+              // we add in sorted order
+              val s0 = s.rangeFrom(vec + 1)
+              val s1 = s0.filter(orthFn(vec, _))
+
+              if ((s1.size + vecs.length + 1) < dim) {
                 // we can't reach a complete set
                 None
               }
               else {
+                val v1 = vec :: vecs
                 Some((basis, (v1, s1)))
               }
             }
@@ -116,6 +127,7 @@ object MubBuild {
             }
         }
         .map(_.toMap)
+    }
 
     private[this] val hads = (0 until goalHads).toList
 
@@ -139,7 +151,7 @@ object MubBuild {
       b(i)._2.size
 
     // fully extend an incomplete basis
-    private def extendBasis(b: Bases, i: Int): Option[TreeB] = {
+    private def extendBasis(b: Bases, i: Int, depth: Int): Option[TreeB] = {
       val orthVectors: List[Int] = forBasis(b, i)
 
       if (orthVectors.length == dim) {
@@ -148,19 +160,28 @@ object MubBuild {
         None
       }
       else {
+        val branchWidth = b(i)._2.size
         // make this a def so the head can be GCe'd below
         def choices = b(i)._2.to(LazyList)
 
         def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] =
-          addVector(b, i, vec).flatMap(extendFully)
+          addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
 
+        val start = System.nanoTime()
         val children = choices.flatMap(extension(_))
-        if (children.isEmpty) None
+        val isEmpty = children.isEmpty
+        val diff = System.nanoTime() - start
+
+        if (depth < 12) {
+          println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
+        }
+
+        if (isEmpty) None
         else Some(Tree.NonEmpty(b, children))
       }
     }
 
-    def extendFully(b: Bases): Option[Tree.NonEmpty[LazyList, Bases]] = {
+    def extendFully(b: Bases, depth: Int): Option[Tree.NonEmpty[LazyList, Bases]] = {
       if (isComplete(b)) Some(Tree.NonEmpty[LazyList, Bases](b, LazyList.empty))
       else {
         // we have to check all,
@@ -172,7 +193,7 @@ object MubBuild {
         val children = greatestToLeast
           .to(LazyList)
           .flatMap { basis =>
-            extendBasis(b, basis)
+            extendBasis(b, basis, depth)
           }
           .collect { case n@Tree.NonEmpty(_, _) => n }
 
@@ -188,7 +209,7 @@ object MubBuild {
       }
       .toMap
 
-    lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis)
+    lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis, 0)
 
     lazy val firstCompleteExample: Option[Bases] =
       fullBases.flatMap(firstComplete(_))

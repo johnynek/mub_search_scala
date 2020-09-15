@@ -217,20 +217,25 @@ object VectorSpace {
       }
     }
 
-    val conjProdInt: () => (Int, Int) => Int = {
-      // TODO this could be optimized to not use an intermediate vector
-      () => {
-        val v1 = zeroVec()
-        val v2 = zeroVec()
-        val target = zeroVec()
-
-        (i1: Int, i2: Int) => {
-          intToVector(i1, v1)
-          intToVector(i2, v2)
-          conjProd(v1, v2, target)
-          vectorToInt(target)
-        }
+    def conjProdInt(v1: Int, v2: Int): Int = {
+      // consider this as a number base nroots
+      var idx = 0
+      var value1 = v1
+      var value2 = v2
+      var res = 0
+      val size = nroots
+      var shift = 1
+      // dim - 1 because we keep the last position 0
+      while (idx < dim) {
+        val pos0 = (value2 - value1) % size
+        val pos = if (pos0 < 0) pos0 + size else pos0
+        res = res + pos * shift
+        shift = shift * size
+        value1 = value1 / size
+        value2 = value2 / size
+        idx = idx + 1
       }
+      res
     }
 
     // we do the conjugate on the left
@@ -425,10 +430,7 @@ object VectorSpace {
     private def buildCachedFn(bitset: BitSet): () => Int => Int => Boolean = {
       // first we compute all the traces that are orthogonal
 
-      val cp = conjProdInt
-
       () => {
-        val intCP = cp()
 
         { n1: Int =>
           if (bitset.get(n1)) {
@@ -436,7 +438,7 @@ object VectorSpace {
             { n2: Int =>
 
               bitset.get(n2) && {
-                val n3 = intCP(n1, n2)
+                val n3 = conjProdInt(n1, n2)
                 bitset.get(n3)
               }
             }
@@ -550,15 +552,13 @@ object VectorSpace {
       // maybe we need some kind of crossMerge function
       import Cliques.Family
 
-      val cp = conjProdInt()
-
       val mub0 = mubs.head
       val hs1Opt =
           // The entire first basis has to be unbiased to the first mub
           // we can use that to trim down the search
           hs.collectHead { h0 =>
             h0.filter { h =>
-              ubBitSet.get(cp(h, mub0))
+              ubBitSet.get(conjProdInt(h, mub0))
             }
           }
 
@@ -578,20 +578,20 @@ object VectorSpace {
               def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
                 // both bases are augmented with the 0 value
                 // we switch the phase because we put it on the left
-                val overall = cp(b1._2, b0._2)
+                val overall = conjProdInt(b1._2, b0._2)
                 val v1s = (0 :: b1._1)
                 (0 :: b0._1).forall { v0 =>
                   v1s.forall { v1 =>
-                    ubBitSet.get(cp(overall, cp(v0, v1)))
+                    ubBitSet.get(conjProdInt(overall, conjProdInt(v0, v1)))
                   }
                 }
               }
 
               def toFull(b0: Basis, mub: Int): Basis = {
                 // we have to do the conjugate twice
-                val conjMub = cp(mub, 0)
+                val conjMub = conjProdInt(mub, 0)
                 (0 :: b0).map { v =>
-                  cp(conjMub, v)
+                  conjProdInt(conjMub, v)
                 }
               }
 
@@ -893,8 +893,6 @@ object VectorSpace {
     mubs: Int,
     limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
 
-    val cp = space.conjProdInt
-
     val nextFn: Int => Option[Int] =
       { i0 =>
         val i1 = i0 + 1
@@ -908,7 +906,7 @@ object VectorSpace {
         space.dim,
         space.standardCount,
         mubs,
-        cp,
+        space.conjProdInt _,
         orthSet,
         mubSet,
         nextFn)
