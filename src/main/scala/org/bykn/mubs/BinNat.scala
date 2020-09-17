@@ -190,6 +190,30 @@ object BinNat {
       }
   }
 
+  sealed trait Lt[B1 <: BinNat, B2 <: BinNat]
+  object Lt extends Lt1 {
+    implicit def apply[B1 <: BinNat, B2 <: BinNat](implicit lt: Lt[B1, B2]): Lt[B1, B2] =
+      lt
+
+    implicit def zeroLtSucc1[B <: BinNat]: Lt[_0, Succ1[B]] = inst
+    implicit def zeroLtSucc2[B <: BinNat]: Lt[_0, Succ2[B]] = inst
+
+    // 2n + 1 < 2n + 2
+    implicit def succ1LtSucc2[B <: BinNat]: Lt[Succ1[B], Succ2[B]] = inst
+
+  }
+
+  trait Lt1 {
+    protected def inst[B1 <: BinNat, B2 <: BinNat]: Lt[B1, B2] =
+      new Lt[B1, B2] { }
+
+    // 2n1 + 1 < 2n2 + 2 => n1 < n2
+    implicit def lt0[B1 <: BinNat, B2 <: BinNat](implicit ltprev: Lt[B1, B2]): Lt[Succ1[B1], Succ1[B2]] = inst
+    implicit def lt1[B1 <: BinNat, B2 <: BinNat](implicit ltprev: Lt[B1, B2]): Lt[Succ2[B1], Succ2[B2]] = inst
+    implicit def lt2[B1 <: BinNat, B2 <: BinNat](implicit ltprev: Lt[B1, B2]): Lt[Succ2[B1], Succ1[B2]] = inst
+    implicit def lt3[B1 <: BinNat, B2 <: BinNat](implicit ltprev: Lt[B1, B2]): Lt[Succ1[B1], Succ2[B2]] = inst
+  }
+
   // divide by two
 
   sealed trait Add[B1 <: BinNat, B2 <: BinNat] {
@@ -231,6 +255,16 @@ object BinNat {
           B1[i.Out, Value[i.Out]](n12)
         }
       }
+
+    implicit def addS21[B1 <: BinNat, B2 <: BinNat, O1 <: BinNat, O <: BinNat](implicit sn: Add.Aux[B1, B2, O1], i: Inc.Aux[O1, O]): Add.Aux[Succ2[B1], Succ1[B2], Succ1[O]]=
+      new Add[Succ2[B1], Succ1[B2]] {
+        type Out = Succ1[O]
+        def apply(b1: Value[Succ2[B1]], b2: Value[Succ1[B2]]): Value[Out] = {
+          // (2n1 + 2) + (2n2 + 1) = 2*(n1 + n2 + 1) + 1
+          val n12: Value[i.Out] = i(sn(half2(b1), half1(b2)))
+          B1[i.Out, Value[i.Out]](n12)
+        }
+      }
     implicit def addS22[B1 <: BinNat, B2 <: BinNat, O1 <: BinNat, O <: BinNat](implicit sn: Add.Aux[B1, B2, O1], i: Inc.Aux[O1, O]): Add.Aux[Succ2[B1], Succ2[B2], Succ2[O]]=
       new Add[Succ2[B1], Succ2[B2]] {
         type Out = Succ2[O]
@@ -243,11 +277,10 @@ object BinNat {
   }
 
   trait Add1 {
-    implicit def addCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: => Add.Aux[B2, B1, O]): Add.Aux[B1, B2, O] =
-      new Add[B1, B2] {
-        type Out = O
-        def apply(b1: Value[B1], b2: Value[B2]): Value[Out] =
-          rev(b2, b1)
+    implicit def add0R[B <: BinNat]: Add.Aux[B, _0, B] =
+      new Add[B, _0] {
+        type Out = B
+        def apply(b1: Value[B], b2: Value[_0]): Value[B] = b1
       }
   }
 
@@ -281,89 +314,104 @@ object BinNat {
     implicit def multS1[
       B1 <: BinNat,
       B2 <: BinNat,
-      Prod12 <: BinNat,
-      Sum12 <: BinNat,
-      Times21 <: BinNat,
-      O <: BinNat](
-        implicit mult: Mult.Aux[B1, B2, Prod12],
-        add: Add.Aux[B1, B2, Sum12],
-        shift1: Times2.Aux[Prod12, Times21],
-        addPs: Add.Aux[Times21, Sum12, O]
-        ): Mult.Aux[Succ1[B1], Succ1[B2], Succ1[O]] =
+      A1 <: BinNat,
+      P1 <: BinNat](
+        implicit
+        mult: Mult.Aux[B1, Succ1[B2], P1],
+        add: Add.Aux[P1, B2, A1]
+        ): Mult.Aux[Succ1[B1], Succ1[B2], Succ1[A1]] =
       new Mult[Succ1[B1], Succ1[B2]] {
-        type Out = Succ1[O]
-        // (2n1 + 1)(2n2 + 1) = 2(2*n1n2 + (n1 + n2)) + 1
+        type Out = Succ1[A1]
+        // (2n1 + 1)(2n2 + 1) =
+        //   2(2n1n2 + n1 + n2) + 1
+        //   2(n1(2n2 + 1) + n2) + 1
         def apply(v1: Value[Succ1[B1]], v2: Value[Succ1[B2]]): Value[Out] = {
-          val o1 = half1(v1)
-          val o2 = half1(v2)
-          val p12: Value[Prod12] = mult(o1, o2)
-          val s2: Value[Times21] = shift1(p12)
-          val a12: Value[Sum12] = add(o1, o2)
-          val addps: Value[addPs.Out] = addPs(s2, a12)
-          B1(addps)
+          val n1 = half1(v1)
+          val n2 = half1(v2)
+          val p1 = mult(n1, v2)
+          val a1 = add(p1, n2)
+          B1(a1)
         }
       }
 
     implicit def multS12[
       B1 <: BinNat,
       B2 <: BinNat,
-      Inc2 <: BinNat,
       Prod12 <: BinNat,
-      Sum12 <: BinNat,
-      Times21 <: BinNat,
       O <: BinNat](
-        implicit inc: Inc.Aux[B2, Inc2],
-        mult: Mult.Aux[B1, Inc2, Prod12],
-        shift1: Times2.Aux[Prod12, Times21],
-        addPs: Add.Aux[Times21, B2, O]
+        implicit mult: Mult.Aux[B1, Succ2[B2], Prod12],
+        add: Add.Aux[Prod12, B2, O]
         ): Mult.Aux[Succ1[B1], Succ2[B2], Succ2[O]] =
       new Mult[Succ1[B1], Succ2[B2]] {
         type Out = Succ2[O]
-        // (2n1 + 1)(2n2 + 2) = 2(2*n1 (n2 + 1) + n2) + 2
+        // (2n1 + 1)(2n2 + 2) = 4n1n2 + 2n2 + 4n1 + 2
+        //   2(n1 * 2(n2 + 1) + n2) + 2
         def apply(v1: Value[Succ1[B1]], v2: Value[Succ2[B2]]): Value[Out] = {
-          val o1 = half1(v1)
-          val o2 = half2(v2)
-          val i2 = inc(o2)
-          val p12: Value[Prod12] = mult(o1, i2)
-          val s1: Value[Times21] = shift1(p12)
-          val a12: Value[addPs.Out] = addPs(s1, o2)
+          val n1 = half1(v1)
+          val n2 = half2(v2)
+          val p12: Value[Prod12] = mult(n1, v2)
+          val a12: Value[add.Out] = add(p12, n2)
           B2(a12)
         }
       }
 
+    implicit def multS21[
+      B1 <: BinNat,
+      B2 <: BinNat,
+      Prod12 <: BinNat,
+      O <: BinNat](
+        implicit
+        mult: Mult.Aux[B2, Succ2[B1], Prod12],
+        addPs: Add.Aux[Prod12, B1, O]
+        ): Mult.Aux[Succ2[B1], Succ1[B2], Succ2[O]] =
+      new Mult[Succ2[B1], Succ1[B2]] {
+        type Out = Succ2[O]
+        // (2n1 + 2)(2n2 + 1) = 4n1n2 + 4n2 + 2n1 + 2
+        //   2(n2 * 2(n1 + 1) + n1) + 2
+        def apply(v1: Value[Succ2[B1]], v2: Value[Succ1[B2]]): Value[Out] = {
+          val n1 = half2(v1)
+          val n2 = half1(v2)
+          val p12: Value[Prod12] = mult(n2, v1)
+          val a12: Value[addPs.Out] = addPs(p12, n1)
+          B2(a12)
+        }
+      }
+
+
     implicit def multS22[
       B1 <: BinNat,
       B2 <: BinNat,
-      I1 <: BinNat,
-      I2 <: BinNat,
-      M <: BinNat,
-      S1 <: BinNat,
-      O <: BinNat](
-        implicit inc1: Inc.Aux[B1, I1],
-        inc2: Inc.Aux[B2, I2],
-        mult: Mult.Aux[I1, I2, M],
-        shift1: Times2.Aux[M, S1],
-        shift2: Times2.Aux[S1, O]): Mult.Aux[Succ2[B1], Succ2[B2], O] =
+      P1 <: BinNat,
+      A1 <: BinNat,
+      A2 <: BinNat,
+      I <: BinNat](
+        implicit
+        mult: Mult.Aux[B1, B2, P1],
+        add1: Add.Aux[B1, B2, A1],
+        add2: Add.Aux[P1, A1, A2],
+        inc: Inc.Aux[A2, I]
+      ): Mult.Aux[Succ2[B1], Succ2[B2], Succ2[I]] =
       new Mult[Succ2[B1], Succ2[B2]] {
-        type Out = O
-        // (2n1 + 2)(2n2 + 2) = 4(n1 + 1) * (n2 + 1)
+        type Out = Succ2[I]
+        // (2n1 + 2)(2n2 + 2) = 4n1n2 + 4n1 + 4n2 + 4
+        // = 2(n1n2 + (n1 + n2) + 1) + 2
         def apply(v1: Value[Succ2[B1]], v2: Value[Succ2[B2]]): Value[Out] = {
-          val o1 = half2(v1)
-          val o2 = half2(v2)
-          val i1: Value[I1] = inc1(o1)
-          val i2: Value[I2] = inc2(o2)
-          val p: Value[M] = mult(i1, i2)
-          val s1: Value[S1] = shift1(p)
-          shift2(s1)
+          val n1 = half2(v1)
+          val n2 = half2(v2)
+          val p1 = mult(n1, n2)
+          val a1 = add1(n1, n2)
+          val a2 = add2(p1, a1)
+          B2(inc(a2))
         }
       }
   }
 
   trait Mult1 {
-    implicit def multCommutes[B1 <: BinNat, B2 <: BinNat, O <: BinNat](implicit rev: => Mult.Aux[B2, B1, O]): Mult.Aux[B1, B2, O] =
-      new Mult[B1, B2] {
-        type Out = O
-        def apply(v1: Value[B1], v2: Value[B2]): Value[Out] = rev(v2, v1)
+    implicit def mult0R[B <: BinNat]: Mult.Aux[B, _0, _0] =
+      new Mult[B, _0] {
+        type Out = _0
+        // 0 * x = 0
+        def apply(v1: Value[B], v2: Value[_0]): Value[_0] = Zero
       }
   }
 
