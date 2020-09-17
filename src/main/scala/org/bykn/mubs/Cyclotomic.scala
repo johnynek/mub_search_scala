@@ -43,8 +43,38 @@ object Cyclotomic extends Priority1Cyclotomic {
 
   def apply[N <: BinNat, C](implicit C: Cyclotomic[N, C]): Cyclotomic[N, C] = C
 
+  trait Indexed[C] {
+    def apply(i: Int): C
+  }
+
+  def prod[N <: BinNat, C](left: Indexed[C], right: Indexed[C], into: Array[C], cyc: Cyclotomic[N, C], size: Int): Unit = {
+
+    def conv(minSum: Int, yj: Int, maxSum: Int): C = {
+      var c = cyc.times(left(minSum), right(yj - minSum))
+      var idx1 = minSum + 1
+      while (idx1 <= maxSum) {
+        val prod = cyc.times(left(idx1), right(yj - idx1))
+        c = cyc.plus(c, prod)
+        idx1 = idx1 + 1
+      }
+      c
+    }
+
+    var idx = 0
+    while (idx < (size - 1)) {
+      // sum i->j xi * y(j - i)
+      val c1 = conv(0, idx, idx)
+      val c2 = conv(idx + 1, size + idx, size - 1)
+      into(idx) = cyc.plus(c1, cyc.timesOmega(c2))
+      idx = idx + 1
+    }
+    // idx = size - 1
+    into(size - 1) = conv(0, size - 1, size - 1)
+  }
+
   implicit val rationalTwoIsCyclotomic: Cyclotomic[BinNat._2, Rational] =
     new Cyclotomic[BinNat._2, Rational] {
+      override def toString = s"Cyclotomic[2, Rational]"
       def plus(left: Rational, right: Rational): Rational =
         left + right
       override def minus(left: Rational, right: Rational): Rational =
@@ -71,6 +101,7 @@ object Cyclotomic extends Priority1Cyclotomic {
 
   implicit val safeLongTwoIsCyclotomic: Cyclotomic[BinNat._2, SafeLong] =
     new Cyclotomic[BinNat._2, SafeLong] {
+      override def toString = s"Cyclotomic[2, SafeLong]"
       def plus(left: SafeLong, right: SafeLong): SafeLong =
         left + right
       override def minus(left: SafeLong, right: SafeLong): SafeLong =
@@ -95,6 +126,67 @@ object Cyclotomic extends Priority1Cyclotomic {
       val roots: Vector[SafeLong] = Vector(one, omega)
     }
 
+  implicit val safeLongThreeIsCyclotomic: Cyclotomic[BinNat._3, Root3[SafeLong]] =
+    new Cyclotomic[BinNat._3, Root3[SafeLong]] {
+
+      override def toString = s"Cyclotomic[3, Root3[SafeLong]]"
+      // Root3(x, x, x) = 0
+      // to maintain a single 0, we take the minimum, then
+      // subtract the min from all
+      def norm(alpha: SafeLong, beta: SafeLong, gamma: SafeLong): Root3[SafeLong] = {
+        val m = alpha.min(beta).min(gamma)
+        Root3(alpha - m, beta - m, gamma - m)
+      }
+
+      def plus(left: Root3[SafeLong], right: Root3[SafeLong]): Root3[SafeLong] =
+        norm(
+          left.alpha + right.alpha,
+          left.beta + right.beta,
+          left.gamma + right.gamma)
+
+      override def minus(left: Root3[SafeLong], right: Root3[SafeLong]): Root3[SafeLong] =
+        norm(
+          left.alpha - right.alpha,
+          left.beta - right.beta,
+          left.gamma - right.gamma)
+
+      def times(left: Root3[SafeLong], right: Root3[SafeLong]): Root3[SafeLong] = {
+        // (a1, w b1, w2 c1) * (a2, w b2, w2 c2)
+        // (a1 a2 + b1 * c2 + c1 * b2) +
+        // w(b1 a2 + c1*c2 + a1 * b2) +
+        // w2 (c1 * a2 + b1 * b2 + a1 * c2)
+        norm(
+          (left.alpha * right.alpha) + (left.beta * right.gamma) + (left.gamma * right.beta),
+          (left.beta * right.alpha)+ (left.gamma * right.gamma) + (left.alpha * right.beta),
+          (left.gamma * right.alpha) + (left.beta * right.beta) + (left.alpha * right.gamma))
+      }
+
+      def negate(r: Root3[SafeLong]): Root3[SafeLong] =
+        // assume r is already normalized
+        norm(-r.alpha, -r.beta, -r.gamma)
+
+      // this is |x|^2 of the current number
+      def abs2(c: Root3[SafeLong]): Real =
+        re(c)*re(c) + im(c)*im(c)
+
+      def re(c: Root3[SafeLong]): Real =
+        Real(c.alpha) + Real(c.beta + c.gamma) * reOmega
+
+      def im(c: Root3[SafeLong]): Real =
+        Real(c.beta - c.gamma) * imOmega
+
+      val one = Root3(SafeLong.one, SafeLong.zero, SafeLong.zero)
+      val zero = Root3(SafeLong.zero, SafeLong.zero, SafeLong.zero)
+      // omega to the 2^root power == one
+      val omega = Root3(SafeLong.zero, SafeLong.one, SafeLong.zero)
+      val reOmega = -Real.one / Real.two
+      val imOmega = Real(3).sqrt / Real.two
+
+      def timesOmega(c: Root3[SafeLong]) =
+        Root3(c.gamma, c.alpha, c.beta)
+
+      val roots: Vector[Root3[SafeLong]] = Vector(one, omega, timesOmega(omega))
+    }
 
   /**
    * this is alpha + sqrt(w(n)) * beta
@@ -103,11 +195,116 @@ object Cyclotomic extends Priority1Cyclotomic {
    */
   case class Root2[C](alpha: C, beta: C)
 
+  /**
+   * (w')^3 = w
+   * this is alpha + w' * beta + w'*w' * gamma
+   *
+   * This allows us to work with cube roots of what-ever the omega is for C
+   */
+  case class Root3[C](alpha: C, beta: C, gamma: C) extends Indexed[C] {
+    def apply(idx: Int): C =
+      idx match {
+        case 0 => alpha
+        case 1 => beta
+        case 2 => gamma
+      }
+  }
+
+  /**
+   * (w')^5 = w
+   * this is alpha + w' * beta + w'*w' * gamma + w'w'w' * delta + w'w'w'w' * eps
+   *
+   * This allows us to work with cube roots of what-ever the omega is for C
+   */
+  case class Root5[C](a1: C, a2: C, a3: C, a4: C, a5: C) extends Indexed[C] {
+    def apply(idx: Int): C =
+      idx match {
+        case 0 => a1
+        case 1 => a2
+        case 2 => a3
+        case 3 => a4
+        case 4 => a5
+      }
+  }
+
+  type C1 = Rational
+  type L1 = SafeLong
+
+  // 2 = 2nd roots (1, -1)
+  type C2 = Rational
+  type L2 = SafeLong
+
+  // 3
+  type C3 = Root3[C1]
+  type L3 = Root3[L1]
+
+  // 2^2 = 4th roots
+  type C4 = Root2[C2]
+  type L4 = Root2[L2]
+
+  // 5th
+  type L5 = Root5[L1]
+
+  // 6th roots 3 * 2
+  type C6 = Root3[C2]
+  type L6 = Root3[L2]
+
+  // 2^3 = 8th roots
+  type C8 = Root2[C4]
+  type L8 = Root2[L4]
+
+  // 3^2 = 9
+  type C9 = Root3[C3]
+  type L9 = Root3[L3]
+
+  // 2*5 = 10
+  type L10 = Root5[L2]
+
+  // 4*3 = 12
+  type C12 = Root3[C4]
+  type L12 = Root3[L4]
+
+  // 3*5 = 15
+  type L15 = Root5[L3]
+
+  // 2^4 = 16th roots
+  type C16 = Root2[C8]
+  type L16 = Root2[L8]
+
+  // 2*9 = 18
+  // for some reason, 3*6 does not resolve
+  // type C18 = Root2[C9]
+  // type L18 = Root2[L9]
+  type C18 = Root3[C6]
+  type L18 = Root3[L6]
+
+  // 4 * 5 = 20
+  type L20 = Root5[L4]
+
+  // 3 * 8 = 24
+  type C24 = Root3[C8]
+  type L24 = Root3[L8]
+
+  // 3 * 9 = 27
+  type C27 = Root3[C9]
+  type L27 = Root3[L9]
+
+  // 2^5 = 32th roots
+  type C32 = Root2[C16]
+  type L32 = Root2[L16]
+}
+
+trait Priority1Cyclotomic extends Priority2Cyclotomic {
+
+  import Cyclotomic._
+
   // there are roots 2 and higher
   // can be represented with rationals alone. the second root,
   // we need i, which cannot be (complex numbers)
-  implicit def root2IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Times2.Aux[N, O]): Cyclotomic[O, Root2[C]] =
+  implicit def root2IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Times2.Aux[N, O], ft: BinNat.FromType[O]): Cyclotomic[O, Root2[C]] =
     new Cyclotomic[O, Root2[C]] {
+      override def toString = s"Cyclotomic[${ft.value}, Root2[$C]]"
+
       def plus(left: Root2[C], right: Root2[C]): Root2[C] =
         if (left eq zero) right
         else if (right eq zero) left
@@ -228,53 +425,17 @@ object Cyclotomic extends Priority1Cyclotomic {
       }
 
     }
+}
 
-  trait Indexed[C] {
-    def apply(i: Int): C
-  }
+trait Priority2Cyclotomic extends Priority3Cyclotomic {
 
-  private def prod[N <: BinNat, C](left: Indexed[C], right: Indexed[C], into: Array[C], cyc: Cyclotomic[N, C], size: Int): Unit = {
+  import Cyclotomic._
 
-    def conv(minSum: Int, yj: Int, maxSum: Int): C = {
-      var c = cyc.times(left(minSum), right(yj - minSum))
-      var idx1 = minSum + 1
-      while (idx1 <= maxSum) {
-        val prod = cyc.times(left(idx1), right(yj - idx1))
-        c = cyc.plus(c, prod)
-        idx1 = idx1 + 1
-      }
-      c
-    }
-
-    var idx = 0
-    while (idx < (size - 1)) {
-      // sum i->j xi * y(j - i)
-      val c1 = conv(0, idx, idx)
-      val c2 = conv(idx + 1, size + idx, size - 1)
-      into(idx) = cyc.plus(c1, cyc.timesOmega(c2))
-      idx = idx + 1
-    }
-    // idx = size - 1
-    into(size - 1) = conv(0, size - 1, size - 1)
-  }
-
-  /**
-   * (w')^3 = w
-   * this is alpha + w' * beta + w'*w' * gamma
-   *
-   * This allows us to work with cube roots of what-ever the omega is for C
-   */
-  case class Root3[C](alpha: C, beta: C, gamma: C) extends Indexed[C] {
-    def apply(idx: Int): C =
-      idx match {
-        case 0 => alpha
-        case 1 => beta
-        case 2 => gamma
-      }
-  }
-
-  implicit def root3IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._3, N, O], ct: ClassTag[C]): Cyclotomic[O, Root3[C]] =
+  implicit def root3IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._3, N, O], ct: ClassTag[C], ft: BinNat.FromType[O]): Cyclotomic[O, Root3[C]] =
     new Cyclotomic[O, Root3[C]] {
+
+      override def toString = s"Cyclotomic[${ft.value}, Root3[$C]]"
+
       def plus(left: Root3[C], right: Root3[C]): Root3[C] =
         if (left eq zero) right
         else if (right eq zero) left
@@ -285,10 +446,13 @@ object Cyclotomic extends Priority1Cyclotomic {
             C.plus(left.gamma, right.gamma))
 
       override def minus(left: Root3[C], right: Root3[C]): Root3[C] =
-        Root3(
-          C.minus(left.alpha, right.alpha),
-          C.minus(left.beta, right.beta),
-          C.minus(left.gamma, right.gamma))
+        if (left eq zero) negate(right)
+        else if (right eq zero) left
+        else
+          Root3(
+            C.minus(left.alpha, right.alpha),
+            C.minus(left.beta, right.beta),
+            C.minus(left.gamma, right.gamma))
 
       def times(left: Root3[C], right: Root3[C]): Root3[C] =
         if ((left eq zero) || (right eq zero)) zero
@@ -343,7 +507,7 @@ object Cyclotomic extends Priority1Cyclotomic {
 
       def abs2(c: Root3[C]): Real =
         if (c eq zero) Real.zero
-        else if ((c eq one) || (c eq omega)) Real.one
+        else if ((c eq one) || (c eq omega) || (c eq omega2)) Real.one
         else {
           val r = re(c)
           val i = im(c)
@@ -423,23 +587,11 @@ object Cyclotomic extends Priority1Cyclotomic {
       }
 
     }
+}
 
-  /**
-   * (w')^5 = w
-   * this is alpha + w' * beta + w'*w' * gamma + w'w'w' * delta + w'w'w'w' * eps
-   *
-   * This allows us to work with cube roots of what-ever the omega is for C
-   */
-  case class Root5[C](a1: C, a2: C, a3: C, a4: C, a5: C) extends Indexed[C] {
-    def apply(idx: Int): C =
-      idx match {
-        case 0 => a1
-        case 1 => a2
-        case 2 => a3
-        case 3 => a4
-        case 4 => a5
-      }
-  }
+trait Priority3Cyclotomic {
+
+  import Cyclotomic._
 
   implicit def root5IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._5, N, O], ct: ClassTag[C]): Cyclotomic[O, Root5[C]] =
     new Cyclotomic[O, Root5[C]] {
@@ -579,122 +731,5 @@ object Cyclotomic extends Priority1Cyclotomic {
 
     }
 
-  // 1st root, which is to say 1
-  type C1 = Rational
-  type L1 = SafeLong
-
-  // 2 = 2nd roots (1, -1)
-  type C2 = Rational
-  type L2 = SafeLong
-
-  // 3
-  type C3 = Root3[C1]
-  type L3 = Root3[L1]
-
-  // 2^2 = 4th roots
-  type C4 = Root2[C2]
-  type L4 = Root2[L2]
-
-  // 5th
-  type L5 = Root5[L1]
-
-  // 6th roots 3 * 2
-  type C6 = Root3[C2]
-  type L6 = Root3[L2]
-
-  // 2^3 = 8th roots
-  type C8 = Root2[C4]
-  type L8 = Root2[L4]
-
-  // 3^2 = 9
-  type C9 = Root3[C3]
-  type L9 = Root3[L3]
-
-  // 2*5 = 10
-  type L10 = Root5[L2]
-
-  // 4*3 = 12
-  type C12 = Root3[C4]
-  type L12 = Root3[L4]
-
-  // 3*5 = 15
-  type L15 = Root5[L3]
-
-  // 2^4 = 16th roots
-  type C16 = Root2[C8]
-  type L16 = Root2[L8]
-
-  // 3*6 = 18
-  type C18 = Root3[C6]
-  type L18 = Root3[L6]
-
-  // 4 * 5 = 20
-  type L20 = Root5[L4]
-
-  // 3 * 8 = 24
-  type C24 = Root3[C8]
-  type L24 = Root3[L8]
-
-  // 3 * 9 = 27
-  type C27 = Root3[C9]
-  type L27 = Root3[L9]
-
-  // 2^5 = 32th roots
-  type C32 = Root2[C16]
-  type L32 = Root2[L16]
-}
-
-trait Priority1Cyclotomic {
-
-  implicit val rationalOneIsCyclotomic: Cyclotomic[BinNat._1, Rational] =
-    new Cyclotomic[BinNat._1, Rational] {
-      def plus(left: Rational, right: Rational): Rational =
-        left + right
-      override def minus(left: Rational, right: Rational): Rational =
-        left - right
-      def times(left: Rational, right: Rational): Rational =
-        left * right
-
-      def negate(r: Rational): Rational = -r
-      // this is |x|^2 of the current number
-      def abs2(c: Rational): Real = Real.Exact(c * c)
-      def re(c: Rational): Real = Real.Exact(c)
-      def im(c: Rational): Real = Real.zero
-
-      def one = Rational.one
-      def zero = Rational.zero
-      // omega to the root power == one
-      def omega = Rational.one
-      def timesOmega(r: Rational) = r
-      def reOmega = Real.one
-      def imOmega = Real.zero
-
-      val roots: Vector[Rational] = Vector(one)
-    }
-
-  implicit val safeLongOneIsCyclotomic: Cyclotomic[BinNat._1, SafeLong] =
-    new Cyclotomic[BinNat._1, SafeLong] {
-      def plus(left: SafeLong, right: SafeLong): SafeLong =
-        left + right
-      override def minus(left: SafeLong, right: SafeLong): SafeLong =
-        left - right
-      def times(left: SafeLong, right: SafeLong): SafeLong =
-        left * right
-
-      def negate(r: SafeLong): SafeLong = -r
-      // this is |x|^2 of the current number
-      def abs2(c: SafeLong): Real = Real.Exact(c * c)
-      def re(c: SafeLong): Real = Real.Exact(c)
-      def im(c: SafeLong): Real = Real.zero
-
-      def one = SafeLong.one
-      def zero = SafeLong.zero
-      def omega = SafeLong.one
-      def reOmega = Real.one
-      def imOmega = Real.zero
-      def timesOmega(c: SafeLong) = c
-
-      val roots: Vector[SafeLong] = Vector(one)
-    }
 }
 

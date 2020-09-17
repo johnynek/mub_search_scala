@@ -727,7 +727,8 @@ object VectorSpace {
     space: Space[N, C],
     bases: Option[BitSet],
     runSync: Boolean,
-    mubsOpt: Option[(Int, BitSet)]
+    mubsOpt: Option[(Int, BitSet)],
+    limitOpt: Option[Int]
     )(implicit ec: ExecutionContext): Future[Unit] = {
 
     println(s"# $space")
@@ -1117,6 +1118,7 @@ object SearchApp extends CommandApp(
 
         if (validSizes(d)) Validated.valid {
           d match {
+            /*
             case 1 => { (d: Int, bits: Int) => new Space[BinNat._1, Cyclotomic.L1](d, bits) }
             case 2 => { (d: Int, bits: Int) => new Space[BinNat._2, Cyclotomic.L2](d, bits) }
             case 3 => { (d: Int, bits: Int) => new Space[BinNat._3, Cyclotomic.L3](d, bits) }
@@ -1134,6 +1136,8 @@ object SearchApp extends CommandApp(
             case 24 => { (d: Int, bits: Int) => new Space[BinNat._24, Cyclotomic.L24](d, bits) }
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
             case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
+            */
+            case _ => ???.asInstanceOf[(Int, Int) => Space[BinNat._2, Cyclotomic.L2]]
           }
         }
         else Validated.invalidNel(s"invalid root: $d. valid values: ${validSizes.toList.sorted}")
@@ -1143,6 +1147,9 @@ object SearchApp extends CommandApp(
     val ubTab = Opts.option[Path]("ub_tab", "path to unbiasedness table")
     val tableOpts: Opts[(Path, Path)] = orthTab.product(ubTab)
 
+    val limitOpt =
+        Opts.option[Int]("limit", "limit printing out to this many mubs").orNone
+
     val spaceOpt =
       realBits
         .product(dim)
@@ -1150,7 +1157,7 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
-      (spaceOpt, goalMubs.orNone, threads, tableOpts, Opts.option[Int]("limit", "limit printing out to this many mubs").orNone)
+      (spaceOpt, goalMubs.orNone, threads, tableOpts, limitOpt)
         .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), limit) =>
           // dim is the most we can get
           val mubs = mubsOpt.getOrElse(space.dim)
@@ -1168,8 +1175,10 @@ object SearchApp extends CommandApp(
         threads,
         (Opts.flag("bases", "compute all the standard bases and give the size") *> orthTab).orNone,
         Opts.flag("sync", "run synchronous (less memory, but no concurrency)").orFalse,
-        (goalMubs.product(ubTab)).orNone)
-        .mapN { (space, cont, bases0, runSync, mubsOpt0) =>
+        (goalMubs.product(ubTab)).orNone,
+        limitOpt
+        )
+        .mapN { (space, cont, bases0, runSync, mubsOpt0, limit) =>
           cont { implicit ec =>
             val bases = bases0.map { path =>
               VectorSpace.readPath(space, true, path)
@@ -1177,7 +1186,7 @@ object SearchApp extends CommandApp(
             val mubsOpt = mubsOpt0.map { case (n, path) =>
               (n, VectorSpace.readPath(space, false, path))
             }
-            Await.result(VectorSpace.runInfo(space, bases, runSync, mubsOpt), Inf)
+            Await.result(VectorSpace.runInfo(space, bases, runSync, mubsOpt, limit), Inf)
           }
         }
 
