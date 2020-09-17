@@ -2,6 +2,7 @@ package org.bykn.mubs
 
 import algebra.ring.CommutativeRing
 import spire.math.{Complex, Real, Rational, SafeLong}
+import scala.reflect.ClassTag
 
 /**
  * represents values in field adjoining rationals with the N-th primitive
@@ -228,15 +229,51 @@ object Cyclotomic extends Priority1Cyclotomic {
 
     }
 
+  trait Indexed[C] {
+    def apply(i: Int): C
+  }
+
+  private def prod[N <: BinNat, C](left: Indexed[C], right: Indexed[C], into: Array[C], cyc: Cyclotomic[N, C], size: Int): Unit = {
+
+    def conv(minSum: Int, yj: Int, maxSum: Int): C = {
+      var c = cyc.times(left(minSum), right(yj - minSum))
+      var idx1 = minSum + 1
+      while (idx1 <= maxSum) {
+        val prod = cyc.times(left(idx1), right(yj - idx1))
+        c = cyc.plus(c, prod)
+        idx1 = idx1 + 1
+      }
+      c
+    }
+
+    var idx = 0
+    while (idx < (size - 1)) {
+      // sum i->j xi * y(j - i)
+      val c1 = conv(0, idx, idx)
+      val c2 = conv(idx + 1, size + idx, size - 1)
+      into(idx) = cyc.plus(c1, cyc.timesOmega(c2))
+      idx = idx + 1
+    }
+    // idx = size - 1
+    into(size - 1) = conv(0, size - 1, size - 1)
+  }
+
   /**
    * (w')^3 = w
    * this is alpha + w' * beta + w'*w' * gamma
    *
    * This allows us to work with cube roots of what-ever the omega is for C
    */
-  case class Root3[C](alpha: C, beta: C, gamma: C)
+  case class Root3[C](alpha: C, beta: C, gamma: C) extends Indexed[C] {
+    def apply(idx: Int): C =
+      idx match {
+        case 0 => alpha
+        case 1 => beta
+        case 2 => gamma
+      }
+  }
 
-  implicit def root3IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._3, N, O]): Cyclotomic[O, Root3[C]] =
+  implicit def root3IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._3, N, O], ct: ClassTag[C]): Cyclotomic[O, Root3[C]] =
     new Cyclotomic[O, Root3[C]] {
       def plus(left: Root3[C], right: Root3[C]): Root3[C] =
         if (left eq zero) right
@@ -258,27 +295,9 @@ object Cyclotomic extends Priority1Cyclotomic {
         else if (left eq one) right
         else if (right eq one) left
         else {
-          // C.omega = w3
-          // (a1 + w1 * b1 + w2 * c1) * (a2 + w1 * b2 + w2 * c2) =
-          //        (a1 * a2 + w3 * (b1 * c2 + c1 * b2))
-          // + w1 * (a1 * b2 + a2 * b1 + w3 * c1 * c2)
-          // + w2 * (a1 * c2 + b1 * b2 + c1 * a2)
-          val a1a2 = C.times(left.alpha, right.alpha)
-          val b1c2 = C.times(left.beta, right.gamma)
-          val c1b2 = C.times(left.gamma, right.beta)
-
-          val a1b2 = C.times(left.alpha, right.beta)
-          val b1a2 = C.times(left.beta, right.alpha)
-          val c1c2 = C.times(left.gamma, right.gamma)
-
-          val a1c2 = C.times(left.alpha, right.gamma)
-          val b1b2 = C.times(left.beta, right.beta)
-          val c1a2 = C.times(left.gamma, right.alpha)
-
-          Root3(
-            C.plus(a1a2, C.timesOmega(C.plus(b1c2, c1b2))),
-            C.plus(C.plus(a1b2, b1a2), C.timesOmega(c1c2)),
-            C.plus(C.plus(a1c2, b1b2), c1a2))
+          val res = new Array[C](3)
+          prod(left, right, res, C, 3)
+          Root3(res(0), res(1), res(2))
         }
 
       def timesOmega(c: Root3[C]): Root3[C] =
@@ -287,9 +306,6 @@ object Cyclotomic extends Priority1Cyclotomic {
         if (c eq zero) zero
         else if (c eq one) omega
         else if (c eq omega) omega2
-        // we could imagine special casing any element of roots
-        // but that would take roots.length work on each
-        // call for a maybe rare case
         else Root3(C.timesOmega(c.gamma), c.alpha, c.beta)
 
       def negate(c: Root3[C]) =
@@ -408,6 +424,161 @@ object Cyclotomic extends Priority1Cyclotomic {
 
     }
 
+  /**
+   * (w')^5 = w
+   * this is alpha + w' * beta + w'*w' * gamma + w'w'w' * delta + w'w'w'w' * eps
+   *
+   * This allows us to work with cube roots of what-ever the omega is for C
+   */
+  case class Root5[C](a1: C, a2: C, a3: C, a4: C, a5: C) extends Indexed[C] {
+    def apply(idx: Int): C =
+      idx match {
+        case 0 => a1
+        case 1 => a2
+        case 2 => a3
+        case 3 => a4
+        case 4 => a5
+      }
+  }
+
+  implicit def root5IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._5, N, O], ct: ClassTag[C]): Cyclotomic[O, Root5[C]] =
+    new Cyclotomic[O, Root5[C]] {
+      def plus(left: Root5[C], right: Root5[C]): Root5[C] =
+        if (left eq zero) right
+        else if (right eq zero) left
+        else
+          Root5(
+            C.plus(left.a1, right.a1),
+            C.plus(left.a2, right.a2),
+            C.plus(left.a3, right.a3),
+            C.plus(left.a4, right.a4),
+            C.plus(left.a5, right.a5)
+          )
+
+      override def minus(left: Root5[C], right: Root5[C]): Root5[C] =
+        Root5(
+          C.minus(left.a1, right.a1),
+          C.minus(left.a2, right.a2),
+          C.minus(left.a3, right.a3),
+          C.minus(left.a4, right.a4),
+          C.minus(left.a5, right.a5)
+        )
+
+      def times(left: Root5[C], right: Root5[C]): Root5[C] =
+        if ((left eq zero) || (right eq zero)) zero
+        else if (left eq one) right
+        else if (right eq one) left
+        else {
+          val res = new Array[C](5)
+          prod(left, right, res, C, 5)
+          Root5(res(0), res(1), res(2), res(3), res(4))
+        }
+
+      def timesOmega(c: Root5[C]): Root5[C] =
+        if (c eq zero) zero
+        else if (c eq one) omega
+        else if (c eq omega) omega2
+        else if (c eq omega2) omega3
+        else if (c eq omega3) omega4
+        else Root5(C.timesOmega(c.a5), c.a1, c.a2, c.a3, c.a4)
+
+      def negate(c: Root5[C]) =
+        if (c eq zero) zero
+        else Root5(C.negate(c.a1), C.negate(c.a2), C.negate(c.a3), C.negate(c.a4), C.negate(c.a5))
+
+      def re(c: Root5[C]): Real =
+        if (c eq zero) Real.zero
+        else if (c eq one) Real.one
+        else if (c eq omega) reOmega
+        else {
+          C.re(c.a1) +
+          (reOmega * C.re(c.a2)) -
+          (imOmega * C.im(c.a2)) +
+          (reOmega2 * C.re(c.a3)) -
+          (imOmega2 * C.im(c.a3)) +
+          (reOmega3 * C.re(c.a4)) -
+          (imOmega3 * C.im(c.a4)) +
+          (reOmega4 * C.re(c.a5)) -
+          (imOmega4 * C.im(c.a5))
+        }
+
+      def im(c: Root5[C]): Real =
+        if ((c eq zero) || (c eq one)) Real.zero
+        else if (c eq omega) imOmega
+        else if (c eq omega2) imOmega2
+        else {
+          C.im(c.a1) +
+          (imOmega * C.re(c.a2)) +
+          (reOmega * C.im(c.a2)) +
+          (imOmega2 * C.re(c.a3)) +
+          (reOmega2 * C.im(c.a3)) +
+          (imOmega3 * C.re(c.a4)) +
+          (reOmega3 * C.im(c.a4)) +
+          (imOmega4 * C.re(c.a5)) +
+          (reOmega4 * C.im(c.a5))
+        }
+
+      def abs2(c: Root5[C]): Real =
+        if (c eq zero) Real.zero
+        else if ((c eq one) || (c eq omega)) Real.one
+        else {
+          val r = re(c)
+          val i = im(c)
+
+          (r*r) + (i*i)
+        }
+
+      val zero = Root5(C.zero, C.zero, C.zero, C.zero, C.zero)
+      val one = Root5(C.one, C.zero, C.zero, C.zero, C.zero)
+
+      val omega: Root5[C] = Root5(C.zero, C.one, C.zero, C.zero, C.zero)
+      val omega2: Root5[C] = Root5(C.zero, C.zero, C.one, C.zero, C.zero)
+      val omega3: Root5[C] = Root5(C.zero, C.zero, C.zero, C.one, C.zero)
+      val omega4: Root5[C] = Root5(C.zero, C.zero, C.zero, C.zero, C.one)
+
+      val reOmega: Real =
+        Real.cos(Real.acos(C.reOmega) / Real(5))
+
+      val imOmega: Real =
+        Real.sin(Real.acos(C.reOmega) / Real(5))
+
+      // the real(omega^2)
+      // cos(2w) = cos^2 w - sin^2(w)
+      //         = 2 cos^2 w - 1
+      val reOmega2: Real =
+        Real.two * reOmega * reOmega - Real.one
+
+      // the im(omega^2)
+      // sin(2w) = 2*sinw * cosw
+      val imOmega2: Real =
+        Real.two * reOmega * imOmega
+
+      // cos(3w) = cos(w)*cos(2w) - sin(w)*sin(2w)
+      val reOmega3: Real =
+        reOmega * reOmega2 - imOmega * imOmega2
+
+      // sin(3w) = sin(w)*cos(2w) + cos(w)*sin(2w)
+      val imOmega3: Real =
+        imOmega * reOmega2 + reOmega * imOmega2
+
+      // cos(4w) = cos(2w)*cos(2w) - sin(2w)*sin(2w) = 2cos^2(2w) - 1
+      val reOmega4: Real =
+        Real.two * reOmega2 * reOmega2 - Real.one
+
+      // sin(4w) = 2 *sin(2w)*cos(2w)
+      val imOmega4: Real =
+        Real.two * imOmega2 * reOmega2
+
+      val roots: Vector[Root5[C]] = {
+        val thisSize = C.roots.length * 5
+        (1 until thisSize).scanLeft(one) { (prev, _) =>
+          timesOmega(prev)
+        }
+        .toVector
+      }
+
+    }
+
   // 1st root, which is to say 1
   type C1 = Rational
   type L1 = SafeLong
@@ -424,6 +595,9 @@ object Cyclotomic extends Priority1Cyclotomic {
   type C4 = Root2[C2]
   type L4 = Root2[L2]
 
+  // 5th
+  type L5 = Root5[L1]
+
   // 6th roots 3 * 2
   type C6 = Root3[C2]
   type L6 = Root3[L2]
@@ -436,9 +610,15 @@ object Cyclotomic extends Priority1Cyclotomic {
   type C9 = Root3[C3]
   type L9 = Root3[L3]
 
+  // 2*5 = 10
+  type L10 = Root5[L2]
+
   // 4*3 = 12
   type C12 = Root3[C4]
   type L12 = Root3[L4]
+
+  // 3*5 = 15
+  type L15 = Root5[L3]
 
   // 2^4 = 16th roots
   type C16 = Root2[C8]
@@ -447,6 +627,9 @@ object Cyclotomic extends Priority1Cyclotomic {
   // 3*6 = 18
   type C18 = Root3[C6]
   type L18 = Root3[L6]
+
+  // 4 * 5 = 20
+  type L20 = Root5[L4]
 
   // 3 * 8 = 24
   type C24 = Root3[C8]

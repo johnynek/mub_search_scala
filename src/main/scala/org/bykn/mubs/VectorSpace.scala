@@ -117,19 +117,10 @@ object VectorSpace {
       vec.map(nearest)
     }
 
-    def innerAbs2(left: List[Complex[Real]], right: List[Complex[Real]]): Real =
-      Ring[Complex[Real]]
-        .sum(
-          left.zip(right)
-            .map { case (u, v) =>
-              u.conjugate * v
-            })
-        .absSquare
-
     //if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)
     def quantizationBoundGap(v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
       require(v1.length == v2.length)
-      require(v1.length == (dim - 1))
+      require(v1.length == dim)
 
       val exact = innerAbs2(v1, v2).sqrt
       val quant = innerAbs2(quantize(v1), quantize(v2)).sqrt
@@ -143,6 +134,7 @@ object VectorSpace {
       // this bound is tight
       gap
     }
+
 
     def zeroVec(): Array[Int] = new Array[Int](dim)
 
@@ -924,11 +916,12 @@ object VectorSpace {
         Complex(Real.cos(theta), Real.sin(theta))
       }
 
+      val cone = Complex(Real.one, Real.zero)
       def nextV(): List[Complex[Real]] =
-        (0 until (space.dim - 1))
+        cone :: ((0 until (space.dim - 1))
           .iterator
-          .map { _ => nextC() }
-          .toList
+          .map(_ => nextC())
+          .toList)
 
       // do this outside of the future since we mutate rng
       val pairs = (0 until trials).map { _ => (nextV(), nextV()) }
@@ -936,6 +929,136 @@ object VectorSpace {
       // now compute the gaps
       Future.traverse(pairs) { case (v1, v2) =>
         Future(space.quantizationBoundGap(v1, v2).doubleValue())
+      }
+      .map { gaps =>
+
+        val minGap = gaps.min
+        val maxGap = gaps.max
+        val totalGap = gaps.sum
+        println(s"minGap = $minGap")
+        println(s"maxGap = $maxGap")
+        println(s"aveGap = ${totalGap / trials}")
+      }
+  }
+
+  def innerAbs2(left: List[Complex[Real]], right: List[Complex[Real]]): Real =
+    Ring[Complex[Real]]
+      .sum(
+        left.zip(right)
+          .map { case (u, v) =>
+            u.conjugate * v
+          })
+      .absSquare
+
+  /**
+   * The idea here is to use:
+   * ||<u', v'>| - |<u, v>|| <= |<u',v'> - <u, v>|
+   *                         <= |<u',v'> - <u'', v''>| + |<u, v> - <u'',v''>|
+   * and we use the 2dsin(pi/(n*k)) bound for a the right-most, and
+   * then exhaustively compute the left side
+   */
+  def quantizationBoundGap2(n: Int, k: Int, v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
+    // | <u', v'> - <u'',v''> | = sum_i exp(2 pi/n * (vi' - ui')) - exp(2 pi/(nk) * (vi'' - ui''))
+    //   = sum_i exp(2 pi/n * (vi' - ui'))(1 - exp(2 pi/(nk) * ((vi'' - kvi') - (ui'' - kui'))))
+    // we know vi' and ui', but not vi'' and ui'', but we know that |k vi' - vi''| < k
+
+    require(v1.length == v2.length)
+    val d = v1.length
+
+    def expi(t: Real): Complex[Real] = Complex(Real.cos(t), Real.sin(t))
+
+    def fineW(i: Int) = expi(Real.two * Real(i) * Real.pi / Real(n * k))
+    def coarseW(i: Int) = expi(Real.two * Real(i) * Real.pi / Real(n))
+    val cs = (0 until n).map { i => coarseW(i) }
+
+    implicit val ordReal: Ordering[Real] =
+      new Ordering[Real] {
+        def compare(r1: Real, r2: Real) = (r1 - r2).signum.toInt
+      }
+
+    // quantize to the coarse level
+    def q(vec: List[Complex[Real]]): List[Complex[Real]] = {
+      def nearest(c: Complex[Real]): Complex[Real] =
+        cs.minBy { wc => (c - wc).absSquare }
+
+      vec.map(nearest)
+    }
+
+    val exact = innerAbs2(v1, v2).sqrt
+    val qv1 = q(v1)
+    val qv2 = q(v2)
+    val quant = innerAbs2(qv1, qv2).sqrt
+    val left = (exact - quant).abs
+
+    val fineBound = Real(2 * (d - 1)) * Real.sin(Real.pi/(n * k))
+    val quantPart = {
+
+      val cone = Complex(Real.one, Real.zero)
+
+      val quants: Iterator[List[Complex[Real]]] = {
+        val diffs =
+          (-2*(k - 1) to 2*(k - 1)).map { diff =>
+            cone - fineW(diff)
+          }
+
+        chooseN(d, diffs)
+      }
+
+      quants.map { choice =>
+        Ring[Complex[Real]]
+          .sum(
+            qv1.zip(qv2).zip(choice).map { case ((u, v), diff) =>
+              u.conjugate * v * diff
+            }
+          )
+          .abs
+      }
+      .max // this is the worst case
+    }
+
+    val right = fineBound + quantPart
+
+    val gap = right - left
+
+    // we know that left <= right so gap >= 0
+    // we want the minimum value to be close to 0 to prove
+    // this bound is tight
+    gap
+  }
+
+  def quantBound2Search(
+    dim: Int,
+    n: Int,
+    k: Int, // multiplier for fineness
+    seed: Long,
+    trials: Int)(implicit ec: ExecutionContext): Future[Unit] = {
+
+      require(trials > 0)
+
+      val rng = new java.util.Random(seed)
+
+      // this is a root of unity
+      def nextC(): Complex[Real] = {
+        // return exp(2 * pi * i *phi)
+        val theta = Real(2 * rng.nextDouble()) * Real.pi
+        Complex(Real.cos(theta), Real.sin(theta))
+      }
+
+      val cone = Complex(Real.one, Real.zero)
+
+      // we generate a random, but standardized len(dim) vector
+      def nextV(): List[Complex[Real]] =
+        cone :: ((0 until (dim - 1))
+          .iterator
+          .map(_ => nextC())
+          .toList)
+
+      // do this outside of the future since we mutate rng
+      val pairs = (0 until trials).map { _ => (nextV(), nextV()) }
+
+      // now compute the gaps
+      Future.traverse(pairs) { case (v1, v2) =>
+        Future(quantizationBoundGap2(n, k, v1, v2).doubleValue())
       }
       .map { gaps =>
 
@@ -983,11 +1106,14 @@ object SearchApp extends CommandApp(
           }
         }
 
+
     val root = Opts.option[Int]("root", "what root of unity")
+
+    val space = root
       .mapValidated { d =>
 
         val validSizes: Set[Int] =
-          Set(1, 2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 27, 32)
+          Set(1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 32)
 
         if (validSizes(d)) Validated.valid {
           d match {
@@ -995,12 +1121,16 @@ object SearchApp extends CommandApp(
             case 2 => { (d: Int, bits: Int) => new Space[BinNat._2, Cyclotomic.L2](d, bits) }
             case 3 => { (d: Int, bits: Int) => new Space[BinNat._3, Cyclotomic.L3](d, bits) }
             case 4 => { (d: Int, bits: Int) => new Space[BinNat._4, Cyclotomic.L4](d, bits) }
+            case 5 => { (d: Int, bits: Int) => new Space[BinNat._5, Cyclotomic.L5](d, bits) }
             case 6 => { (d: Int, bits: Int) => new Space[BinNat._6, Cyclotomic.L6](d, bits) }
             case 8 => { (d: Int, bits: Int) => new Space[BinNat._8, Cyclotomic.L8](d, bits) }
             case 9 => { (d: Int, bits: Int) => new Space[BinNat._9, Cyclotomic.L9](d, bits) }
+            case 10 => { (d: Int, bits: Int) => new Space[BinNat._10, Cyclotomic.L10](d, bits) }
             case 12 => { (d: Int, bits: Int) => new Space[BinNat._12, Cyclotomic.L12](d, bits) }
+            case 15 => { (d: Int, bits: Int) => new Space[BinNat._15, Cyclotomic.L15](d, bits) }
             case 16 => { (d: Int, bits: Int) => new Space[BinNat._16, Cyclotomic.L16](d, bits) }
             case 18 => { (d: Int, bits: Int) => new Space[BinNat._18, Cyclotomic.L18](d, bits) }
+            case 20 => { (d: Int, bits: Int) => new Space[BinNat._20, Cyclotomic.L20](d, bits) }
             case 24 => { (d: Int, bits: Int) => new Space[BinNat._24, Cyclotomic.L24](d, bits) }
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
             case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
@@ -1016,7 +1146,7 @@ object SearchApp extends CommandApp(
     val spaceOpt =
       realBits
         .product(dim)
-        .product(root)
+        .product(space)
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
@@ -1082,6 +1212,20 @@ object SearchApp extends CommandApp(
         }
     }
 
+    val quantSearch2 = {
+      (dim,
+        root,
+        Opts.option[Int]("mult", "finer multiplier on roots for bounding"),
+        threads,
+        Opts.option[Long]("seed", "the seed to use, or use nanoTime").orElse(Opts(System.nanoTime())),
+        Opts.option[Int]("count", "the number of pairs to check, default = 1000").orElse(Opts(1000)))
+        .mapN { (dim, n, k, cont, seed, cnt) =>
+          cont { implicit ec =>
+            Await.result(VectorSpace.quantBound2Search(dim = dim, n = n, k = k, seed = seed, trials = cnt), Inf)
+          }
+        }
+    }
+
     Opts.subcommand("search", "run a search for mubs")(search)
       .orElse(
         Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
@@ -1089,6 +1233,8 @@ object SearchApp extends CommandApp(
         Opts.subcommand("write_table", "compute an orthogonality/unbiasedness table and write to file")(writeTable))
       .orElse(
         Opts.subcommand("quant_search", "explore the tightness of the quantization bound")(quantSearch))
+      .orElse(
+        Opts.subcommand("quant_search2", "explore the tightness of the quantization bound")(quantSearch2))
   }
 
 )
