@@ -1113,17 +1113,14 @@ object SearchApp extends CommandApp(
     val space = root
       .mapValidated { d =>
 
-        val validSizes: Set[Int] =
-          Set(1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 32)
+        val validSizes: List[Int] =
+          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 32)
 
-        if (validSizes(d)) Validated.valid {
+        if (validSizes.contains(d)) Validated.valid {
           d match {
-            /*
-            case 1 => { (d: Int, bits: Int) => new Space[BinNat._1, Cyclotomic.L1](d, bits) }
             case 2 => { (d: Int, bits: Int) => new Space[BinNat._2, Cyclotomic.L2](d, bits) }
             case 3 => { (d: Int, bits: Int) => new Space[BinNat._3, Cyclotomic.L3](d, bits) }
             case 4 => { (d: Int, bits: Int) => new Space[BinNat._4, Cyclotomic.L4](d, bits) }
-            case 5 => { (d: Int, bits: Int) => new Space[BinNat._5, Cyclotomic.L5](d, bits) }
             case 6 => { (d: Int, bits: Int) => new Space[BinNat._6, Cyclotomic.L6](d, bits) }
             case 8 => { (d: Int, bits: Int) => new Space[BinNat._8, Cyclotomic.L8](d, bits) }
             case 9 => { (d: Int, bits: Int) => new Space[BinNat._9, Cyclotomic.L9](d, bits) }
@@ -1136,11 +1133,12 @@ object SearchApp extends CommandApp(
             case 24 => { (d: Int, bits: Int) => new Space[BinNat._24, Cyclotomic.L24](d, bits) }
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
             case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
-            */
-            case _ => ???.asInstanceOf[(Int, Int) => Space[BinNat._2, Cyclotomic.L2]]
+            case _ =>
+              sys.error(s"expected $d in $validSizes")
           }
         }
-        else Validated.invalidNel(s"invalid root: $d. valid values: ${validSizes.toList.sorted}")
+        else
+          Validated.invalidNel(s"invalid root: $d. valid values: ${validSizes}")
       }
 
     val orthTab = Opts.option[Path]("orth_tab", "path to orthogonality table")

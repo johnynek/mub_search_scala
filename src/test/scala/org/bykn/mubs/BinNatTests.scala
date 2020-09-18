@@ -42,6 +42,14 @@ class BinNatTests extends munit.FunSuite {
   implicitly[Add.Aux[_2, _2, _4]]
   implicitly[Add.Aux[_2, _3, _5]]
   implicitly[Add.Aux[_3, _2, _5]]
+  implicitly[Add.Aux[_3, _3, _6]]
+  implicitly[Add.Aux[_4, _1, _5]]
+  implicitly[Add.Aux[_1, _4, _5]]
+  implicitly[Add.Aux[_4, _2, _6]]
+  implicitly[Add.Aux[_2, _4, _6]]
+  implicitly[Add.Aux[_4, _3, _7]]
+  implicitly[Add.Aux[_3, _4, _7]]
+  implicitly[Add.Aux[_4, _4, _8]]
 
 
   test("test some negative examples: Add") {
@@ -65,6 +73,13 @@ class BinNatTests extends munit.FunSuite {
   implicitly[Mult.Aux[_3, _2, _6]]
   implicitly[Mult.Aux[_2, _3, _6]]
   implicitly[Mult.Aux[_3, _3, _9]]
+  implicitly[Mult.Aux[_4, _1, _4]]
+  implicitly[Mult.Aux[_1, _4, _4]]
+  implicitly[Mult.Aux[_4, _2, _8]]
+  implicitly[Mult.Aux[_2, _4, _8]]
+  implicitly[Mult.Aux[_4, _3, _12]]
+  implicitly[Mult.Aux[_3, _4, _12]]
+  implicitly[Mult.Aux[_4, _4, _16]]
 
   test("test some negative examples: Mult") {
     assertNoDiff(

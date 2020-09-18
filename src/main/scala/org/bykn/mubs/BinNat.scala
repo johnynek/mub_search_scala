@@ -214,8 +214,6 @@ object BinNat {
     implicit def lt3[B1 <: BinNat, B2 <: BinNat](implicit ltprev: Lt[B1, B2]): Lt[Succ1[B1], Succ2[B2]] = inst
   }
 
-  // divide by two
-
   sealed trait Add[B1 <: BinNat, B2 <: BinNat] {
     type Out <: BinNat
 
@@ -382,26 +380,21 @@ object BinNat {
       B1 <: BinNat,
       B2 <: BinNat,
       P1 <: BinNat,
-      A1 <: BinNat,
-      A2 <: BinNat,
-      I <: BinNat](
+      A1 <: BinNat](
         implicit
-        mult: Mult.Aux[B1, B2, P1],
-        add1: Add.Aux[B1, B2, A1],
-        add2: Add.Aux[P1, A1, A2],
-        inc: Inc.Aux[A2, I]
-      ): Mult.Aux[Succ2[B1], Succ2[B2], Succ2[I]] =
+        mult: Mult.Aux[B1, Succ2[B2], P1],
+        add1: Add.Aux[P1, Succ1[B2], A1],
+      ): Mult.Aux[Succ2[B1], Succ2[B2], Succ2[A1]] =
       new Mult[Succ2[B1], Succ2[B2]] {
-        type Out = Succ2[I]
+        type Out = Succ2[A1]
         // (2n1 + 2)(2n2 + 2) = 4n1n2 + 4n1 + 4n2 + 4
-        // = 2(n1n2 + (n1 + n2) + 1) + 2
+        // = 2(n1(2 n2 + 2) + 2n2 + 1) + 2
         def apply(v1: Value[Succ2[B1]], v2: Value[Succ2[B2]]): Value[Out] = {
           val n1 = half2(v1)
           val n2 = half2(v2)
-          val p1 = mult(n1, n2)
-          val a1 = add1(n1, n2)
-          val a2 = add2(p1, a1)
-          B2(inc(a2))
+          val p1 = mult(n1, v2)
+          val a1 = add1(p1, B1(n2))
+          B2(a1)
         }
       }
   }
@@ -415,10 +408,20 @@ object BinNat {
       }
   }
 
+
+  // smallest factor
+  // 0, 2*0 + 1 => Nothing
+  // 2(n + 1) => 2
+  // 2*1 + 1 => 3
+  // 2*2 + 1 => 5
+  // 2*3 + 1 => 7
+  // 2*4 + 1 => 3
+  // 2n + 1 => if (
+
   type _1 = Succ1[_0]
   type _2 = Succ2[_0]
   type _3 = Succ1[_1]
-  type _4 = Succ2[_1]
+  type _4 = Succ2[_1] // Succ2[Succ1[_0]]
   type _5 = Succ1[_2]
   type _6 = Succ2[_2]
   type _7 = Succ1[_3]
