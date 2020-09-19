@@ -301,6 +301,11 @@ object Cyclotomic {
   implicit val root27CycSL: Cyclotomic[BinNat._27, L27] =
     root3IsCyclotomic[BinNat._9, L9, BinNat._27]
 
+  // 5 * 6 = 30th roots
+  type L30 = Root5[L6]
+  implicit val root30CycSL: Cyclotomic[BinNat._30, L30] =
+    root5IsCyclotomic[BinNat._6, L6, BinNat._30]
+
   // 2^5 = 32th roots
   type L32 = Root2[L16]
   implicit val root32CycSL: Cyclotomic[BinNat._32, L32] =

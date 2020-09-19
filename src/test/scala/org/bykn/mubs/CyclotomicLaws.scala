@@ -8,7 +8,7 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
 
   override def scalaCheckTestParameters =
     super.scalaCheckTestParameters
-      .withMinSuccessfulTests(500)
+      .withMinSuccessfulTests(5000)
       .withMaxDiscardRatio(10)
 
   lazy val cyclotomic = cyclotomic0
@@ -39,7 +39,7 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
   implicit lazy val arbCyc: Arbitrary[C] =
     Arbitrary(gen)
 
-  test("roots matches N") {
+  test(s"roots = $roots matches ${ft.value.toBigInt}") {
     assert(roots == ft.value.toBigInt.toInt)
   }
 
@@ -162,7 +162,7 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
       assert((cComp == Real.zero) == (c == cyclotomic.zero), s"cComp = $cComp, c = $c")
     }
   }
-  */
+   */
 
   test(s"C$depth sum of all roots is 0") {
     val left = cyclotomic.roots.reduce(cyclotomic.plus(_, _))
@@ -202,4 +202,5 @@ class CyclotomicLawsL18 extends CyclotomicLaws[BinNat._18, Cyclotomic.L18]
 class CyclotomicLawsL20 extends CyclotomicLaws[BinNat._20, Cyclotomic.L20]
 class CyclotomicLawsL24 extends CyclotomicLaws[BinNat._24, Cyclotomic.L24]
 class CyclotomicLawsL27 extends CyclotomicLaws[BinNat._27, Cyclotomic.L27]
+class CyclotomicLawsL30 extends CyclotomicLaws[BinNat._30, Cyclotomic.L30]
 class CyclotomicLawsL32 extends CyclotomicLaws[BinNat._32, Cyclotomic.L32]

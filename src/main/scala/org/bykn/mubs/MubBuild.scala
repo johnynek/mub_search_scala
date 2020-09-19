@@ -159,7 +159,7 @@ object MubBuild {
           addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
 
         if (depth < 12) {
-          println(s"#depth = $depth, basis = $i, width = $branchWidth")
+          //println(s"#depth = $depth, basis = $i, width = $branchWidth")
         }
 
         val start = System.nanoTime()
@@ -168,7 +168,7 @@ object MubBuild {
         val diff = System.nanoTime() - start
 
         if (depth < 12) {
-          println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
+          //println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
         }
 
         if (isEmpty) None
@@ -206,7 +206,24 @@ object MubBuild {
 
     lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis, 0)
 
-    lazy val firstCompleteExample: Option[Bases] =
+    lazy val firstCompleteExample: Option[Map[Int, List[Int]]] =
       fullBases.flatMap(firstComplete(_))
+        .map(_.map { case (k, (v, _)) => (k, v) })
+
+    lazy val completeCount: Long = {
+      def completeCountOf(n: Tree[LazyList, Bases]): Long =
+        n match {
+          case Tree.Empty() => 0L
+          case Tree.NonEmpty(h, cs) =>
+            val rest = cs.foldLeft(0L) { (acc, t) => acc + completeCountOf(t) }
+            val hcount = if (isComplete(h)) 1L else 0L
+            hcount + rest
+        }
+
+      fullBases match {
+        case None => 0
+        case Some(t) => completeCountOf(t)
+      }
+    }
   }
 }

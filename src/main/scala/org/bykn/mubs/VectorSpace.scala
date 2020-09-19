@@ -884,7 +884,7 @@ object VectorSpace {
     orthSet: BitSet,
     mubSet: BitSet,
     mubs: Int,
-    limit: Option[Int])(implicit ec: ExecutionContext): Future[Unit] = {
+    showCount: Boolean)(implicit ec: ExecutionContext): Future[Unit] = {
 
     Future {
       println(s"# $space")
@@ -897,6 +897,9 @@ object VectorSpace {
         mubSet)
 
       println(s"found: ${mubBuild.firstCompleteExample}")
+      if (showCount) {
+        println(s"count: ${mubBuild.completeCount}")
+      }
     }
   }
 
@@ -1114,7 +1117,7 @@ object SearchApp extends CommandApp(
       .mapValidated { d =>
 
         val validSizes: List[Int] =
-          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 32)
+          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 30, 32)
 
         if (validSizes.contains(d)) Validated.valid {
           d match {
@@ -1132,6 +1135,7 @@ object SearchApp extends CommandApp(
             case 20 => { (d: Int, bits: Int) => new Space[BinNat._20, Cyclotomic.L20](d, bits) }
             case 24 => { (d: Int, bits: Int) => new Space[BinNat._24, Cyclotomic.L24](d, bits) }
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
+            case 30 => { (d: Int, bits: Int) => new Space[BinNat._30, Cyclotomic.L30](d, bits) }
             case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
             case _ =>
               sys.error(s"expected $d in $validSizes")
@@ -1155,6 +1159,19 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
+      (spaceOpt, goalMubs.orNone, threads, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse)
+        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), showCount) =>
+          // dim is the most we can get
+          val mubs = mubsOpt.getOrElse(space.dim)
+
+          cont { implicit ec =>
+            val orthBS = VectorSpace.readPath(space, true, orthPath)
+            val ubBS = VectorSpace.readPath(space, false, ubPath)
+            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, showCount), Inf)
+          }
+        }
+
+    val search0 =
       (spaceOpt, goalMubs.orNone, threads, tableOpts, limitOpt)
         .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), limit) =>
           // dim is the most we can get
@@ -1163,7 +1180,7 @@ object SearchApp extends CommandApp(
           cont { implicit ec =>
             val orthBS = VectorSpace.readPath(space, true, orthPath)
             val ubBS = VectorSpace.readPath(space, false, ubPath)
-            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, limit), Inf)
+            Await.result(VectorSpace.search0(space, orthBS, ubBS, mubs, limit), Inf)
           }
         }
 
@@ -1234,6 +1251,8 @@ object SearchApp extends CommandApp(
     }
 
     Opts.subcommand("search", "run a search for mubs")(search)
+      .orElse(
+        Opts.subcommand("search0", "run a parallel search for mubs")(search0))
       .orElse(
         Opts.subcommand("info", "show the count of bases and or mub vectors")(info))
       .orElse(
