@@ -16,62 +16,109 @@ object BinNat {
   /**
    * Values correspond the actual numbers of a given type
    */
-  sealed abstract class Value[B <: BinNat] {
-    type Size = B
+  sealed abstract class Value[+B <: BinNat] {
     def toBigInt: BigInt
     override def toString = toBigInt.toString
+
+    def inc: Value[BinNat]
+    def +(that: Value[BinNat]): Value[BinNat]
+    def *(that: Value[BinNat]): Value[BinNat]
+    def pow(that: Value[BinNat]): Value[BinNat] =
+      that match {
+        case Zero => succ1(Zero)
+        case B1(p1) =>
+          // x^(2n + 1) = x * (x^n)^2
+          val y = pow(p1)
+          this * y * y
+        case B2(p1) =>
+          // x^(2n + 2) = (x^(n + 1))^2
+          val y = pow(p1.inc)
+          y * y
+      }
   }
 
   case object Zero extends Value[_0] {
     def toBigInt: BigInt = BigInt(0)
+    def inc: Value[BinNat] = B1[_0, Zero.type](Zero)
+    def +(that: Value[BinNat]): Value[BinNat] = that
+    def *(that: Value[BinNat]): Value[BinNat] = this
   }
 
   // 2n + 1
   case class B1[B <: BinNat, V <: Value[B]](of: V) extends Value[Succ1[B]]{
     def toBigInt: BigInt = of.toBigInt * 2 + 1
+    def inc: Value[BinNat] = B2[B, V](of)
+    def +(that: Value[BinNat]): Value[BinNat] =
+      that match {
+        case Zero => this
+        case B1(o1) =>
+          // (2n1 + 1) + (2n2 + 1) = 2(n1 + n2) + 2
+          succ2(of + o1)
+        case B2(o2) =>
+          // (2n1 + 1) + (2n2 + 2) = 2(n1 + n2 + 1) + 1
+          succ1((of + o2).inc)
+      }
+    def *(that: Value[BinNat]): Value[BinNat] =
+      that match {
+        case Zero => Zero
+        case v1@B1(o1) =>
+          // (2n1 + 1)(2n2 + 1) =
+          //   2(2n1n2 + n1 + n2) + 1
+          //   2(n1(2n2 + 1) + n2) + 1
+          succ1((of * v1) + o1)
+        case v2@B2(o2) =>
+          // (2n1 + 1)(2n2 + 2) = 4n1n2 + 2n2 + 4n1 + 2
+          //   2(n1 * 2(n2 + 1) + n2) + 2
+          succ2((of * v2) + o2)
+      }
   }
   // 2n + 2
   case class B2[B <: BinNat, V <: Value[B]](of: V) extends Value[Succ2[B]] {
     def toBigInt: BigInt = of.toBigInt * 2 + 2
-  }
-
-  /**
-   * This gives us a way to hold a Value of an unknown
-   * type, which is to say, when we don't statically
-   * know the value of the number
-   */
-  sealed abstract class WithType {
-    type B <: BinNat
-    def value: Value[B]
-
-    override def toString = value.toString
-    override def equals(that: Any): Boolean =
+    // 2n + 2 + 1 = 2(n + 1) + 1
+    def inc: Value[BinNat] = B1[BinNat, Value[BinNat]](of.inc)
+    def +(that: Value[BinNat]): Value[BinNat] =
       that match {
-        case wt: WithType => value == wt.value
-        case _ => false
+        case Zero => this
+        case B1(o1) =>
+          // (2n1 + 2) + (2n2 + 1) = 2(n1 + n2 + 1) + 1
+          succ1((of + o1).inc)
+        case B2(o2) =>
+          // (2n1 + 2) + (2n2 + 2) = 2(n1 + n2 + 1) + 2
+          succ2((of + o2).inc)
       }
-    override def hashCode = value.hashCode
+    def *(that: Value[BinNat]): Value[BinNat] =
+      that match {
+        case Zero => Zero
+        case B1(o1) =>
+          // (2n1 + 2)(2n2 + 1) = 4n1n2 + 4n2 + 2n1 + 2
+          //   2(n2 * 2(n1 + 1) + n1) + 2
+          succ2((o1 * this) + of)
+        case v2@B2(o2) =>
+          // (2n1 + 2)(2n2 + 2) = 4n1n2 + 4n1 + 4n2 + 4
+          // = 2(n1(2 n2 + 2) + 2n2 + 1) + 2
+          succ2((of *  v2) + succ1(o2))
+      }
   }
 
-  object WithType {
-    def apply[B0 <: BinNat](v: Value[B0]): WithType { type B = B0 } =
-      new WithType {
-        type B = B0
-        def value = v
-      }
+  def succ1[B <: BinNat](v: Value[B]): Value[Succ1[B]] =
+    B1(v)
 
-    val Zero: WithType { type B = _0 } =
-      apply(BinNat.Zero)
-  }
+  def succ2[B <: BinNat](v: Value[B]): Value[Succ2[B]] =
+    B2(v)
 
-  def valueFromBigInt(i: BigInt): WithType =
-    if (i.compare(BigInt(0)) <= 0) WithType.Zero
+  def valueFromBigInt(i: BigInt): Value[BinNat] =
+    if (i.compare(BigInt(0)) <= 0) Zero
     else {
       // we are > 0
+      // 2n + 1 or 2n + 2 for n >= 0
       val mod = (i % 2).toInt
-      val half = valueFromBigInt(i / 2)
-      if (mod == 1) WithType(B1[half.B, Value[half.B]](half.value))
-      else WithType(B2[half.B, Value[half.B]](half.value))
+      val half = i / 2
+      if (mod == 1) succ1(valueFromBigInt(half))
+      else {
+        // i / 2 = n + 1
+        succ2(valueFromBigInt(half - 1))
+      }
     }
 
   // there can only be one value of this type: B1
@@ -98,27 +145,23 @@ object BinNat {
 
   // given a type, get the value back
   sealed trait FromType[B <: BinNat] {
-    type Out <: Value[B]
-    def value: Out
+    def value: Value[B]
   }
   object FromType {
     implicit val zeroFromType: FromType[_0] =
       new FromType[_0] {
-        type Out = Zero.type
         def value = Zero
       }
     implicit def fromType1[B <: BinNat](implicit ft: FromType[B]): FromType[Succ1[B]] =
       new FromType[Succ1[B]] {
-        type Out = B1[B, ft.Out]
         val value = B1(ft.value)
       }
     implicit def fromType2[B <: BinNat](implicit ft: FromType[B]): FromType[Succ2[B]] =
       new FromType[Succ2[B]] {
-        type Out = B2[B, ft.Out]
         val value = B2(ft.value)
       }
 
-    def value[B <: BinNat](implicit ft: FromType[B]): ft.Out =
+    def value[B <: BinNat](implicit ft: FromType[B]): Value[B] =
       ft.value
   }
 
@@ -408,6 +451,60 @@ object BinNat {
       }
   }
 
+  sealed trait Pow[B1 <: BinNat, B2 <: BinNat] {
+    type Out <: BinNat
+    def apply(v1: Value[B1], exp: Value[B2]): Value[Out]
+  }
+
+  object Pow {
+    type Aux[B1 <: BinNat, B2 <: BinNat, O <: BinNat] = Pow[B1, B2] { type Out = O }
+
+    implicit def powZero[B <: BinNat]: Aux[B, _0, _1] =
+      new Pow[B, _0] {
+        type Out = _1
+        def apply(v1: Value[B], v2: Value[_0]): Value[_1] = succ1(v2)
+      }
+
+    implicit def powS1[
+      B1 <: BinNat,
+      B2 <: BinNat,
+      P1 <: BinNat,
+      P2 <: BinNat,
+      O <: BinNat](
+        implicit
+        p1: Aux[B1, B2, P1],
+        m1: Mult.Aux[P1, P1, P2],
+        m2: Mult.Aux[P2, B1, O]
+      ): Aux[B1, Succ1[B2], O] =
+        new Pow[B1, Succ1[B2]] {
+          type Out = O
+          def apply(v1: Value[B1], v2: Value[Succ1[B2]]): Value[O] = {
+            val n2 = half1(v2)
+            val pow1 = p1(v1, n2)
+            m2(m1(pow1, pow1), v1)
+          }
+        }
+
+    implicit def powS2[
+      B1 <: BinNat,
+      B2 <: BinNat,
+      I1 <: BinNat,
+      P1 <: BinNat,
+      O <: BinNat](
+        implicit
+        i1: Inc.Aux[B2, I1],
+        p1: Aux[B1, I1, P1],
+        m1: Mult.Aux[P1, P1, O],
+      ): Aux[B1, Succ2[B2], O] =
+        new Pow[B1, Succ2[B2]] {
+          type Out = O
+          def apply(v1: Value[B1], v2: Value[Succ2[B2]]): Value[O] = {
+            val n2 = i1(half2(v2))
+            val pow = p1(v1, n2)
+            m1(pow, pow)
+          }
+        }
+  }
 
   // smallest factor
   // 0, 2*0 + 1 => Nothing

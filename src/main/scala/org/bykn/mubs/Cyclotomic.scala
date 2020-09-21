@@ -50,7 +50,7 @@ sealed abstract class Cyclotomic[N <: BinNat, C] { self =>
   // this can often be optimized
   def timesOmega(c: C): C
 
-  final def root(implicit N: BinNat.FromType[N]): N.Out = N.value
+  final def root(implicit N: BinNat.FromType[N]): BinNat.Value[N] = N.value
 
   // a vector of length N
   // starting with 1, omega, omega^2, ...
