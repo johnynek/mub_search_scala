@@ -1,0 +1,43 @@
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 3 --depth 5 --mubs 4 --orth_tab tabs/orth_dim\=3_depth\=5 --ub_tab tabs/unbiased_dim\=3_dept
+h\=5
+# Space(dim = 3, roots = 32, standardCount = 1024, realBits = 30, eps = 0.3920685613182424079767822555545673834445, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.0234375, pUb = 0.310546875
+found: None
+
+real    5m42.026s
+user    5m52.238s
+sys     0m0.830s
+
+6 using the |<> - sqrt(d)| <= eps instead of |<>| <= sqrt(d) + eps
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 6 --depth 5 --mubs 3 --orth_tab tabs/orth_dim\=6_depth\=5 --ub_tab tabs/unbiased_dim\=6_dept
+h\=5
+# Space(dim = 6, roots = 32, standardCount = 33554432, realBits = 30, eps = 0.9801714032956060199419556388864184586114, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.13780206441879272, pUb = 0.5746062099933624
+
+... rand for 12 hours without finding anything
+
+usind the <= sqrt(d) + eps:
+
+# Space(dim = 6, roots = 32, standardCount = 33554432, realBits = 30, eps = 0.9801714032956060199419556388864184586114, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.13780206441879272, pUb = 0.8579598367214203
+/// so, that's worse.... but maybe actually correct unfortunately...
+
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 6 --depth 5 --mubs 3 --orth_tab tabs/orth_dim\=6_depth\=5 --ub_tab tabs/unbiased_dim\=6_depth\=5
+# Space(dim = 6, roots = 32, standardCount = 33554432, realBits = 30, eps = 0.9801714032956060199419556388864184586114, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.13780206441879272, pUb = 0.8579598367214203
+found: Some(Map(0 -> (List(20361062, 14836977, 10136761, 415203, 11890, 0),TreeSet()), 1 -> (List(21443087, 14838649, 9059171, 417902, 11417, 615),TreeSet()), 2 -> (List(20360277, 14837184, 9058795, 417494, 14147, 239),TreeSet())))
+
+real    0m45.769s
+user    1m51.475s
+sys     0m1.485s
+
+
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 4 --root 10 --mubs 5 --orth_tab tabs/orth_dim\=4_root\=10 --ub_tab tabs/unbiased_dim\=4_root\=10
+# Space(dim = 4, roots = 10, standardCount = 1000, realBits = 30, eps = 1.8541019662496845446137605030969143531609, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.513, pUb = 0.972
+
+^C
+
+real    4030m11.285s
+user    4126m31.030s
+sys     6m37.631s
