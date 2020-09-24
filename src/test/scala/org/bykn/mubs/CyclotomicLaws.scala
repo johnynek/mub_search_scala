@@ -87,6 +87,35 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
     }
   }
 
+  property(s"C$depth re(conj(c) * c) == abs2(c), im(conj(c) * c) == )") {
+    forAll { c: C =>
+      val prod = cyclotomic.times(cyclotomic.conj(c), c)
+
+      assert(cyclotomic.re(prod) == cyclotomic.abs2(c))
+      assert(cyclotomic.im(prod) == Real.zero)
+    }
+  }
+
+  property(s"C$depth re(conj(c)) == re(c), im(conj(c)) + im(c) == 0") {
+    forAll { c: C =>
+      val cc = cyclotomic.conj(c)
+      assert(cyclotomic.re(cc) == cyclotomic.re(c))
+      assert(cyclotomic.im(cc) + cyclotomic.im(c) == Real.zero)
+    }
+  }
+  property(s"C$depth conj(conj(c)) == c") {
+    forAll { c: C =>
+      val cc = cyclotomic.conj(c)
+      val c1 = cyclotomic.conj(cc)
+      assert(c1 == c)
+    }
+  }
+
+  test(s"C$depth conjugating roots gives the same set") {
+    val croots = cyclotomic.roots.map(cyclotomic.conj)
+    assert(croots.toSet == cyclotomic.roots.toSet)
+  }
+
   property(s"C$depth cyclotomic a * 1 = a") {
     forAll { a: C =>
       cyclotomic.times(a, cyclotomic.one) == a

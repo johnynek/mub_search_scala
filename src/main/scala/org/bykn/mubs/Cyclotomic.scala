@@ -17,6 +17,8 @@ sealed abstract class Cyclotomic[N <: BinNat, C] { self =>
   def abs2(c: C): Real
   def re(c: C): Real
   def im(c: C): Real
+  // return the complex conjugate
+  def conj(c: C): C
 
   def plus(left: C, right: C): C
   def minus(left: C, right: C): C
@@ -114,6 +116,7 @@ object Cyclotomic {
       def abs2(c: R): Real = to.toReal(R.times(c, c))
       def re(c: R): Real = to.toReal(c)
       def im(c: R): Real = Real.zero
+      def conj(c: R): R = c
 
       def one = R.one
       def zero = R.zero
@@ -173,6 +176,10 @@ object Cyclotomic {
 
       def im(c: Root3[R]): Real =
         to.toReal(R.minus(c.beta, c.gamma)) * imOmega
+
+      def conj(c: Root3[R]): Root3[R] =
+        // conj(omega) == omega2
+        Root3(c.alpha, c.gamma, c.beta)
 
       val one = Root3(R.one, R.zero, R.zero)
       val zero = Root3(R.zero, R.zero, R.zero)
@@ -379,6 +386,17 @@ object Cyclotomic {
         else if (c eq omega) imOmega
         else C.im(c.alpha) + imOmega * C.re(c.beta) + (reOmega * C.im(c.beta))
 
+      def conj(c: Root2[C]): Root2[C] = {
+        // conj(a + sqrt(w) * b) = conj(a) + conj(sqrt(w)) * conj(b)
+        // we know w is Nth root of unity, so,
+        // conj(sqrt(w)) = exp(2 pi i (2N - 1)/ 2N) = sqrt(w)^(2N - 1) power
+        val ca = C.conj(c.alpha)
+        val cb = C.conj(c.beta)
+        val right1 = C.times(omegaConj.alpha, cb)
+        val right2 = C.times(omegaConj.beta, cb)
+        Root2(C.plus(ca, right1), right2)
+      }
+
       //|a + sqrt(w)*b|^2 =
       //(a + sqrt(w)*b)*(a' + sqrt(w)'b')
       //|a|^2 + |w|*|b|^2 + a'*sqrt(w)*b + a*sqrt(w)'b'
@@ -421,6 +439,11 @@ object Cyclotomic {
       // omega to the 2^root power == one
       // this omega = sqrt(C.omega)
       val omega: Root2[C] = Root2(C.zero, C.one)
+
+      private[this] val omegaConj: Root2[C] = {
+        val thisSize = C.roots.length * 2
+        pow(omega, thisSize - 1)
+      }
 
       /**
        * cos(theta) = cos(C.theta/2) = sqrt((1 + cos(C.theta))/2)
@@ -521,6 +544,27 @@ object Cyclotomic {
           (reOmega2 * C.im(c.gamma))
         }
 
+      def conj(c: Root3[C]): Root3[C] = {
+        // conj(a + nroot(w, 3) * b + nroot(w, 3)^2 * c) = conj(a) + conj(omega) * conj(b) + conj(omega2) * conj(c)
+        // we know w is Nth root of unity, so,
+        // conj(omega) = exp(2 pi i (3N - 1)/ 3N) = omega^(3N - 1) power
+        // conj(omega2) = exp(2 pi i (2(3N - 1))/ 3N) = omega2^(3N - 1) power
+        val ca = C.conj(c.alpha)
+        val cb = C.conj(c.beta)
+        val cc = C.conj(c.gamma)
+        val beta1 = C.times(omegaConj.alpha, cb)
+        val beta2 = C.times(omegaConj.beta, cb)
+        val beta3 = C.times(omegaConj.gamma, cb)
+
+        val gamma1 = C.times(omega2Conj.alpha, cc)
+        val gamma2 = C.times(omega2Conj.beta, cc)
+        val gamma3 = C.times(omega2Conj.gamma, cc)
+        Root3(
+          C.plus(C.plus(ca, beta1), gamma1),
+          C.plus(beta2, gamma2),
+          C.plus(beta3, gamma3))
+      }
+
       def abs2(c: Root3[C]): Real =
         if (c eq zero) Real.zero
         else if ((c eq one) || (c eq omega) || (c eq omega2)) Real.one
@@ -537,6 +581,16 @@ object Cyclotomic {
       // this omega = pow(C.omega, 1/3)
       val omega: Root3[C] = Root3(C.zero, C.one, C.zero)
       val omega2: Root3[C] = Root3(C.zero, C.zero, C.one)
+
+      private[this] val omegaConj: Root3[C] = {
+        val thisSize = C.roots.length * 3
+        pow(omega, thisSize - 1)
+      }
+
+      private[this] val omega2Conj: Root3[C] = {
+        val thisSize = C.roots.length * 3
+        pow(omega2, thisSize - 1)
+      }
 
       /**
        * theta is the previous omega
@@ -681,6 +735,24 @@ object Cyclotomic {
           (reOmega4 * C.im(c.a5))
         }
 
+      def elemTimes(c: C, r: Root5[C]): Root5[C] =
+        Root5(
+          C.times(c, r.a1),
+          C.times(c, r.a2),
+          C.times(c, r.a3),
+          C.times(c, r.a4),
+          C.times(c, r.a5))
+
+      def conj(c: Root5[C]): Root5[C] = {
+        val ca1 = Root5(C.conj(c.a1), C.zero, C.zero, C.zero, C.zero)
+        val ca2 = elemTimes(C.conj(c.a2), omegaConj)
+        val ca3 = elemTimes(C.conj(c.a3), omega2Conj)
+        val ca4 = elemTimes(C.conj(c.a4), omega3Conj)
+        val ca5 = elemTimes(C.conj(c.a5), omega4Conj)
+
+        sum(ca1 :: ca2 :: ca3 :: ca4 :: ca5 :: Nil)
+      }
+
       def abs2(c: Root5[C]): Real =
         if (c eq zero) Real.zero
         else if ((c eq one) || (c eq omega)) Real.one
@@ -698,6 +770,13 @@ object Cyclotomic {
       val omega2: Root5[C] = Root5(C.zero, C.zero, C.one, C.zero, C.zero)
       val omega3: Root5[C] = Root5(C.zero, C.zero, C.zero, C.one, C.zero)
       val omega4: Root5[C] = Root5(C.zero, C.zero, C.zero, C.zero, C.one)
+
+      val thisSize = C.roots.length * 5
+
+      val omegaConj = pow(omega, thisSize - 1)
+      val omega2Conj = pow(omega2, thisSize - 1)
+      val omega3Conj = pow(omega3, thisSize - 1)
+      val omega4Conj = pow(omega4, thisSize - 1)
 
       val reOmega: Real =
         Real.cos(Real.acos(C.reOmega) / Real(5))
@@ -732,13 +811,11 @@ object Cyclotomic {
       val imOmega4: Real =
         Real.two * imOmega2 * reOmega2
 
-      val roots: Vector[Root5[C]] = {
-        val thisSize = C.roots.length * 5
+      val roots: Vector[Root5[C]] =
         (1 until thisSize).scanLeft(one) { (prev, _) =>
           timesOmega(prev)
         }
         .toVector
-      }
 
     }
 
