@@ -14,8 +14,7 @@ sealed abstract class Vect[L <: BinNat, N <: BinNat, A] {
 
   def trace(implicit cs: Cyclotomic[N, A]): A
 
-  def innerProd(that: Vect[L, N, A])(implicit C: Cyclotomic[N, A]): A =
-    (conj * that).trace
+  def innerProd(that: Vect[L, N, A])(implicit C: Cyclotomic[N, A]): A
 
   def cross[B1 <: BinNat, B2 <: BinNat](that: Vect[B1, N, A])(implicit m: BinNat.Mult.Aux[L, B1, B2], cs: Cyclotomic[N, A]): Vect[B2, N, A]
 
@@ -67,6 +66,16 @@ object Vect {
         var res = cs.zero
         while (idx < ary.length) {
           res = cs.plus(res, ary(idx))
+          idx += 1
+        }
+        res
+      }
+
+      def innerProd(that: Vect[L, N, A])(implicit C: Cyclotomic[N, A]): A = {
+        var idx = 0
+        var res = C.zero
+        while (idx < ary.length) {
+          res = C.plus(res, C.times(C.conj(ary(idx)), that(idx)))
           idx += 1
         }
         res
