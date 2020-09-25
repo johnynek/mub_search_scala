@@ -88,6 +88,12 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
     }
   }
 
+  property(s"C$depth toComplex.conjugate == conj.toComplex") {
+    forAll { c: C =>
+      assert(cyclotomic.toComplex(c).conjugate == cyclotomic.toComplex(cyclotomic.conj(c)))
+    }
+  }
+
   property(s"C$depth re(conj(c) * c) == abs2(c), im(conj(c) * c) == )") {
     forAll { c: C =>
       val prod = cyclotomic.times(cyclotomic.conj(c), c)
@@ -211,10 +217,10 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
     }
   }
 
-  test(s"C$depth toComplex(omega).sqrt == reOmega + i*imOmega") {
-    val rootOmega = cyclotomic.toComplex(cyclotomic.omega)
-    assert(rootOmega.real.compare(cyclotomic.reOmega) == 0, s"${rootOmega.real} != ${cyclotomic.reOmega}")
-    assert(rootOmega.imag.compare(cyclotomic.imOmega) == 0, s"${rootOmega.imag} != ${cyclotomic.imOmega}")
+  test(s"C$depth toComplex(omega) == reOmega + i*imOmega") {
+    val omegaComplex = cyclotomic.toComplex(cyclotomic.omega)
+    assert(omegaComplex.real.compare(cyclotomic.reOmega) == 0, s"${omegaComplex.real} != ${cyclotomic.reOmega}")
+    assert(omegaComplex.imag.compare(cyclotomic.imOmega) == 0, s"${omegaComplex.imag} != ${cyclotomic.imOmega}")
   }
 }
 
