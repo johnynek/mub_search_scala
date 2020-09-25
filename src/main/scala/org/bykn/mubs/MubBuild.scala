@@ -204,6 +204,46 @@ object MubBuild {
       }
       .toMap
 
+    // each Int is a vector encoded as a single Int
+    def makeBases(bases: List[List[Int]]): Option[Bases] = {
+      bases.foreach { lst =>
+        if (lst.length > dim) throw new IllegalArgumentException(s"expected basis size <= $dim: $lst")
+        lst.foreach { v =>
+          if ((v < 0) || (standardCount < v)) {
+            throw new IllegalArgumentException(s"expected encoded vectors in [0, $standardCount), found: $v in $lst")
+          }
+        }
+      }
+
+      if (bases.length != goalHads) {
+        throw new IllegalArgumentException(s"expected $goalHads bases, found: ${bases.length} in $bases")
+      }
+
+      bases.map(_.sorted) match {
+        case (Nil | (Nil :: _)) => None
+        case (h :: tail) :: brest =>
+          def toSS(it: Iterator[Int]): SortedSet[Int] = {
+            val ss = SortedSet.newBuilder[Int]
+            ss ++= it
+            ss.result()
+          }
+
+          val orthToH = toSS((0 until standardCount).iterator.filter { left => orthBitSet.get(cpFn(left, h)) })
+          val ubToH = toSS((0 until standardCount).iterator.filter { left => ubBitSet.get(cpFn(left, h)) })
+
+          val b0 = (0 until goalHads).foldLeft(Map.empty: Bases) { (m, basis) =>
+            if (basis == 0) m.updated(0, (h :: Nil, orthToH))
+            else m.updated(basis, (Nil, ubToH))
+          }
+
+        (tail :: brest).zipWithIndex.foldM(b0) { case (bases, (vectors, basis)) =>
+          vectors.foldM(b0) { (b, v) =>
+            addVector(b, basis, v)
+          }
+        }
+      }
+    }
+
     lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis, 0)
 
     lazy val firstCompleteExample: Option[Map[Int, List[Int]]] =
