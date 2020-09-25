@@ -119,12 +119,7 @@ class VectTests extends munit.FunSuite {
     val n3_24 =
       Vect.standardBasisDim3[BinNat._24, BinNat._8, Cyclotomic.L24]
 
-    val n6 = n2_24.zip(n3_24).map { case (b2, b3) =>
-      for {
-        v2 <- b2
-        v3 <- b3
-      } yield v2.cross(v3)
-    }
+    val n6 = Vect.crossBasis(n2_24, n3_24)
 
     areMubs(2, n6)
   }

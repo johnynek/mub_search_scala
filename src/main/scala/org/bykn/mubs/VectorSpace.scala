@@ -710,6 +710,48 @@ object VectorSpace {
     loop(n)
   }
 
+  // choose without replacement
+  def chooseWOR[A](n: Int, items: List[A]): Iterator[List[A]] = {
+    def atAny(h: A, ls: List[A]): Iterator[List[A]] =
+      (0 to ls.length)
+        .iterator
+        .map { pos =>
+          ls.take(pos) ::: (h :: ls.drop(pos))
+        }
+
+    def perms(items: List[A]): Iterator[List[A]] =
+      items match {
+        case (Nil | (_ :: Nil)) =>
+          Iterator.single(items)
+        case h1 :: h2 :: Nil =>
+          Iterator(h1 :: h2 :: Nil, h2 :: h1 :: Nil)
+        case h :: tail =>
+          // permute the tails, then we can put
+          // at any position
+          perms(tail)
+            .flatMap(atAny(h, _))
+      }
+
+    def loop(n: Int, items: List[A]): Iterator[List[A]] =
+      if (n < 0) Iterator.empty
+      else if (n == 0) {
+        Iterator.single(Nil)
+      }
+      else {
+        items match {
+          case Nil =>
+            // taking > 0, but none left
+            Iterator.empty
+          case head :: tail =>
+            val in = loop(n - 1, tail).map(head :: _)
+            val out = loop(n, tail)
+            in ++ out
+        }
+      }
+
+    loop(n, items).flatMap(perms(_))
+  }
+
   def allDistinctPairs[A](items: List[A]): List[(A, A)] = {
     @annotation.tailrec
     def loop(items: List[A], acc: List[(A, A)]): List[(A, A)] =
@@ -903,6 +945,36 @@ object VectorSpace {
     }
   }
 
+  def extend6[N <: BinNat, K2 <: BinNat: BinNat.FromType, K3 <: BinNat: BinNat.FromType, C: ClassTag](
+    space: Space[N, C],
+    orthSet: BitSet,
+    mubSet: BitSet,
+    mubs: Int)(implicit ec: ExecutionContext, m2: BinNat.Mult.Aux[BinNat._4, K2, N], m3: BinNat.Mult.Aux[BinNat._3, K3, N]): Future[Unit] = {
+
+    implicit val C: Cyclotomic[N, C] = space.C
+
+    Future {
+      println(s"# $space")
+      val mubBuild = new MubBuild.Instance(
+        space.dim,
+        space.standardCount,
+        mubs,
+        space.conjProdInt _,
+        orthSet,
+        mubSet)
+
+
+      chooseWOR(2, Vect.standardBasisDim3[N, K3, C])
+        .foreach { pairOfDim3 =>
+          val bases6: List[List[Vect[BinNat._6, N, C]]] =
+            Vect.crossBasis(Vect.standardBasisDim2[N, K2, C], pairOfDim3)
+
+          val asBases = mubBuild.fromVectBasis(bases6)
+          val comp = mubBuild.findFirstCompleteExampleFrom(asBases)
+          println(s"found: $comp")
+        }
+    }
+  }
 
   def quantBoundSearch[N <: BinNat, C](
     space: Space[N, C],
@@ -1250,6 +1322,17 @@ object SearchApp extends CommandApp(
         }
     }
 
+    val extend6 =
+      (threads, tableOpts).mapN { case (cont, (orthPath, ubPath)) =>
+        cont { implicit ec =>
+          val space = new Space[BinNat._24, Cyclotomic.L24](dim = 6, realBits = 30)
+          val orthBS = VectorSpace.readPath(space, true, orthPath)
+          val ubBS = VectorSpace.readPath(space, false, ubPath)
+          val f = VectorSpace.extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthBS, ubBS, 3)
+          Await.result(f, Inf)
+        }
+      }
+
     Opts.subcommand("search", "run a search for mubs")(search)
       .orElse(
         Opts.subcommand("search0", "run a parallel search for mubs")(search0))
@@ -1261,6 +1344,8 @@ object SearchApp extends CommandApp(
         Opts.subcommand("quant_search", "explore the tightness of the quantization bound")(quantSearch))
       .orElse(
         Opts.subcommand("quant_search2", "explore the tightness of the quantization bound")(quantSearch2))
+      .orElse(
+        Opts.subcommand("extend6", "try to extend standard product bases")(extend6))
   }
 
 )

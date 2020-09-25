@@ -148,18 +148,15 @@ object BinNat {
     def value: Value[B]
   }
   object FromType {
-    implicit val zeroFromType: FromType[_0] =
-      new FromType[_0] {
-        def value = Zero
-      }
+    final case class Instance[B <: BinNat](value: Value[B]) extends FromType[B]
+
+    implicit val zeroFromType: FromType[_0] = Instance(Zero)
+
     implicit def fromType1[B <: BinNat](implicit ft: FromType[B]): FromType[Succ1[B]] =
-      new FromType[Succ1[B]] {
-        val value = B1(ft.value)
-      }
+      Instance(B1(ft.value))
+
     implicit def fromType2[B <: BinNat](implicit ft: FromType[B]): FromType[Succ2[B]] =
-      new FromType[Succ2[B]] {
-        val value = B2(ft.value)
-      }
+      Instance(B2(ft.value))
 
     def value[B <: BinNat](implicit ft: FromType[B]): Value[B] =
       ft.value

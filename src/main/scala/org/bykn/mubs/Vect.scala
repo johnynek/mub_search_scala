@@ -120,8 +120,8 @@ object Vect {
     def i(root: Int): Int = ki * root
 
     List(
-      List(rootVector(0, 0), rootVector(0, i(2))),
-      List(rootVector(0, i(1)), rootVector(0, i(3)))
+      List(rootVector(0, 0), rootVector(i(2), 0)),
+      List(rootVector(i(1), 0), rootVector(i(3), 0))
     )
   }
 
@@ -138,19 +138,32 @@ object Vect {
     List(
       List(
         rootVector(0, 0, 0),
-        rootVector(0, i(1), i(2)),
-        rootVector(0, i(2), i(1)),
+        rootVector(i(1), i(2), 0),
+        rootVector(i(2), i(1), 0),
         ),
       List(
-        rootVector(0, i(1), i(1)),
         rootVector(0, i(2), 0),
-        rootVector(0, 0, i(2)),
+        rootVector(i(1), i(1), 0),
+        rootVector(i(2), 0, 0),
         ),
       List(
-        rootVector(0, i(2), i(2)),
-        rootVector(0, 0, i(1)),
         rootVector(0, i(1), 0),
+        rootVector(i(1), 0, 0),
+        rootVector(i(2), i(2), 0),
         )
     )
   }
+
+  def crossBasis[L1 <: BinNat, L2 <: BinNat, L3 <: BinNat, N <: BinNat, C](
+    b1: List[List[Vect[L1, N, C]]],
+    b2: List[List[Vect[L2, N, C]]])(implicit mult: BinNat.Mult.Aux[L1, L2, L3], C: Cyclotomic[N, C]): List[List[Vect[L3, N, C]]] =
+
+    b1
+      .zip(b2)
+      .map { case (b2, b3) =>
+        for {
+          v2 <- b2
+          v3 <- b3
+        } yield v2.cross(v3)
+      }
 }

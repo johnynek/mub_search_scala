@@ -204,6 +204,45 @@ object MubBuild {
       }
       .toMap
 
+
+    /**
+     * This allows you to manually construct a basis and then search for extensions to the bases
+     */
+    def fromVectBasis[L <: BinNat, N <: BinNat, C](bases: List[List[Vect[L, N, C]]])(implicit C: Cyclotomic[N, C], L: BinNat.FromType[L]): Bases = {
+      val lenInt = L.value.toBigInt.toInt
+      if (lenInt != dim)
+        throw new IllegalArgumentException(s"expected vector length to be $dim found $lenInt")
+
+      val nInt = C.roots.length
+      val size = BigInt(nInt).pow(L.value.toBigInt.toInt - 1).toInt
+
+      if (size != standardCount)
+        throw new IllegalArgumentException(s"expected Int embedding space to be $standardCount found $size")
+
+      @annotation.tailrec
+      def toInt(c: C, idx: Int): Int =
+        if (C.roots(idx) == c) idx
+        else toInt(c, idx + 1)
+
+      def vectToInt(v: Vect[L, N, C]): Int = {
+        val last = toInt(v(lenInt - 1), 0)
+        if (last != 0) throw new IllegalArgumentException(s"expected last index to be unity in $v")
+
+        var idx = lenInt - 1
+        var acc = 0
+        while (idx > 0) {
+          idx = idx - 1
+          acc = acc * nInt + toInt(v(idx), 0)
+        }
+        return acc
+      }
+
+      makeBases(bases.map(_.map(vectToInt))) match {
+        case Some(bases) => bases
+        case None => throw new IllegalArgumentException(s"bases: $bases did not form a valid basis")
+      }
+    }
+
     // each Int is a vector encoded as a single Int
     def makeBases(bases: List[List[Int]]): Option[Bases] = {
       bases.foreach { lst =>
@@ -215,11 +254,19 @@ object MubBuild {
         }
       }
 
-      if (bases.length != goalHads) {
-        throw new IllegalArgumentException(s"expected $goalHads bases, found: ${bases.length} in $bases")
+      if (bases.length > goalHads) {
+        throw new IllegalArgumentException(s"expected <= $goalHads bases, found: ${bases.length} in $bases")
       }
+      // add some empty bases
+      val empty = List.fill(goalHads - bases.length)(List.empty[Int])
 
-      bases.map(_.sorted) match {
+      def sortFn(ls: List[Int]): Int =
+        if (ls.isEmpty) Int.MaxValue
+        else ls.min
+
+      (bases ::: empty)
+        .map(_.sorted)
+        .sortBy(sortFn) match {
         case (Nil | (Nil :: _)) => None
         case (h :: tail) :: brest =>
           def toSS(it: Iterator[Int]): SortedSet[Int] = {
@@ -243,6 +290,11 @@ object MubBuild {
         }
       }
     }
+
+    def findFirstCompleteExampleFrom(b: Bases): Option[Map[Int, List[Int]]] =
+      extendFully(b, 0)
+        .flatMap(firstComplete(_))
+        .map(_.map { case (k, (v, _)) => (k, v) })
 
     lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis, 0)
 
