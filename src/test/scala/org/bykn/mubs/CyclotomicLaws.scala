@@ -31,6 +31,7 @@ abstract class CyclotomicLaws[N <: BinNat, C](implicit cyclotomic0: => Cyclotomi
       (1, Gen.const(cyclotomic.zero)),
       (4, Gen.choose(0, roots - 1).map(cyclotomic.roots(_))),
       (2, rec.map(cyclotomic.negate(_))),
+      (2, rec.map(cyclotomic.conj(_))),
       (1, op(cyclotomic.plus(_, _))),
       (1, op(cyclotomic.minus(_, _))),
       (1, op(cyclotomic.times(_, _))))
