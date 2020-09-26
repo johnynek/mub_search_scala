@@ -18,15 +18,7 @@ import spire.math.{SafeLong, Complex, Real}
 import cats.implicits._
 
 /**
- * We say a pair of vectors, of dimension d
- * is approximately orthogonal
- * if |<a, b>|^2 <= 4d sin^2(pi / n)
- *
- * we are approximately unbiased
- *
- * if ||<a, b>|^2 - d| <= 4d sin^2(pi / n)
- *
- * TODO: we can standardize an MUB
+ * we standardize an MUB
  *
  * by Zi H_i W_i
  * such that the first row and column
@@ -163,6 +155,14 @@ object VectorSpace {
       }
     }
 
+    def intToVect[L <: BinNat: BinNat.FromType](i: Int): Vect[L, N, C] = {
+      val lInt = BinNat.FromType.value[L].toBigInt.toInt
+      if (lInt != dim) throw new IllegalArgumentException(s"expected L($lInt) == $dim")
+      val ary = new Array[Int](lInt)
+      intToVector(i, ary)
+      Vect.rootVector[L, N, C](ary: _*)
+    }
+
     // if there is a vector after the current
     // one, inc to that and return true
     def incInPlace(v: Array[Int]): Boolean = {
@@ -262,6 +262,9 @@ object VectorSpace {
       diff(realBits).signum <= 0
     }
 
+    def isOrthExact(r: Real): Boolean =
+      r == Real.zero
+
     // we know |a| <= d
     // so, ||a|- sqrt(d)| <= d + sqrt(d)
     //
@@ -278,6 +281,11 @@ object VectorSpace {
       val diff = (r.sqrt - realD.sqrt).abs - eps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
+    }
+
+    // |<u, v>|^2 == d
+    def isUnbiasedExact(r: Real): Boolean = {
+      r == realD
     }
 
     def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
@@ -823,8 +831,15 @@ object VectorSpace {
   def writeTable[N <: BinNat, C](
     space: Space[N, C],
     isOrthTable: Boolean,
-    dos: DataOutputStream)(implicit ec: ExecutionContext): Future[Unit] = {
-    val fn = if (isOrthTable) space.isOrth(_) else space.isUnbiased(_)
+    dos: DataOutputStream,
+    exact: Boolean)(implicit ec: ExecutionContext): Future[Unit] = {
+    val fn =
+      (isOrthTable, exact) match {
+        case (true, false) => space.isOrth(_)
+        case (false, false) => space.isUnbiased(_)
+        case (true, true) => space.isOrthExact(_)
+        case (false, true) => space.isUnbiasedExact(_)
+      }
 
     space.buildCacheFuture(fn)
       .flatMap { bitset =>
@@ -948,8 +963,7 @@ object VectorSpace {
   def extend6[N <: BinNat, K2 <: BinNat: BinNat.FromType, K3 <: BinNat: BinNat.FromType, C: ClassTag](
     space: Space[N, C],
     orthSet: BitSet,
-    mubSet: BitSet,
-    mubs: Int)(implicit ec: ExecutionContext, m2: BinNat.Mult.Aux[BinNat._4, K2, N], m3: BinNat.Mult.Aux[BinNat._3, K3, N]): Future[Unit] = {
+    mubSet: BitSet)(implicit ec: ExecutionContext, m2: BinNat.Mult.Aux[BinNat._4, K2, N], m3: BinNat.Mult.Aux[BinNat._3, K3, N]): Future[Unit] = {
 
     implicit val C: Cyclotomic[N, C] = space.C
 
@@ -958,7 +972,7 @@ object VectorSpace {
       val mubBuild = new MubBuild.Instance(
         space.dim,
         space.standardCount,
-        mubs,
+        goalHads = 3,
         space.conjProdInt _,
         orthSet,
         mubSet)
@@ -970,8 +984,51 @@ object VectorSpace {
             Vect.crossBasis(Vect.standardBasisDim2[N, K2, C], pairOfDim3)
 
           val asBases = mubBuild.fromVectBasis(bases6)
-          val comp = mubBuild.findFirstCompleteExampleFrom(asBases)
-          println(s"found: $comp")
+          println(s"candidate vectors: ${asBases(2)._2.size}")
+          println(asBases.map { case (k, (v, s)) => (k, (v, s.size)) })
+
+          def showV(v: Vect[BinNat._6, N, C]): String =
+            v.show { c =>
+              val idx = C.roots.indexOf(c)
+              require(idx >= 0)
+              val N = C.roots.length
+              s"e^{2 pi i ($idx / $N)}"
+            }
+
+          mubBuild.findFirstCompleteExampleFrom(asBases) match {
+            case None => println("impossible")
+            case Some(b) =>
+              val bVec: Map[Int, List[Vect[BinNat._6, N, C]]] =
+                b.map { case (basis, vecs) =>
+                  (basis, vecs.map(space.intToVect[BinNat._6]))
+                }
+
+              val thirdBasis = bVec(2)
+              val orths =
+                for {
+                  v1 <- thirdBasis.iterator
+                  v2 <- thirdBasis.iterator
+                  if (v1 ne v2)
+                } yield C.abs2(v1.innerProd(v2))
+
+              val maxOrth = orths.max
+
+              val ubs =
+                for {
+                  v1 <- bVec(0).iterator ++ bVec(1).iterator
+                  v2 <- thirdBasis.iterator
+                } yield C.abs2(v1.innerProd(v2))
+
+              val maxUb = ubs.maxBy { r => (Real(3) - r).abs }
+              println(
+                bVec
+                  .iterator
+                  .map { case (b, vs) => s"basis: $b\n" + vs.map(showV).mkString("\n") }
+                  .mkString("\n\n")
+                )
+              println(s"max orth: $maxOrth")
+              println(s"max Ub: $maxUb")
+          }
         }
     }
   }
@@ -1189,7 +1246,7 @@ object SearchApp extends CommandApp(
       .mapValidated { d =>
 
         val validSizes: List[Int] =
-          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 30, 32)
+          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 30, 32, 36)
 
         if (validSizes.contains(d)) Validated.valid {
           d match {
@@ -1209,6 +1266,7 @@ object SearchApp extends CommandApp(
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
             case 30 => { (d: Int, bits: Int) => new Space[BinNat._30, Cyclotomic.L30](d, bits) }
             case 32 => { (d: Int, bits: Int) => new Space[BinNat._32, Cyclotomic.L32](d, bits) }
+            case 36 => { (d: Int, bits: Int) => new Space[BinNat._36, Cyclotomic.L36](d, bits) }
             case _ =>
               sys.error(s"expected $d in $validSizes")
           }
@@ -1282,13 +1340,15 @@ object SearchApp extends CommandApp(
         threads,
         Opts.flag("orth", "build the orthTable").as(true)
           .orElse(Opts.flag("unbiased", "build the unbiasedness table").as(false)),
-        Opts.option[Path]("output", "file to write to"))
-        .mapN { (space, cont, isOrth, path) =>
+        Opts.option[Path]("output", "file to write to"),
+        Opts.flag("exact", "don't weaken to approximate").orFalse
+        )
+        .mapN { (space, cont, isOrth, path, exact) =>
           cont { implicit ec =>
             val output = new FileOutputStream(path.toFile)
             val gz = new GZIPOutputStream(output)
             val data = new DataOutputStream(gz)
-            val fut = VectorSpace.writeTable(space, isOrth, data)
+            val fut = VectorSpace.writeTable(space, isOrth, data, exact)
             try Await.result(fut, Inf)
             finally {
               data.close()
@@ -1328,7 +1388,7 @@ object SearchApp extends CommandApp(
           val space = new Space[BinNat._24, Cyclotomic.L24](dim = 6, realBits = 30)
           val orthBS = VectorSpace.readPath(space, true, orthPath)
           val ubBS = VectorSpace.readPath(space, false, ubPath)
-          val f = VectorSpace.extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthBS, ubBS, 3)
+          val f = VectorSpace.extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthBS, ubBS)
           Await.result(f, Inf)
         }
       }

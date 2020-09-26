@@ -318,6 +318,11 @@ object Cyclotomic {
   implicit val root32CycSL: Cyclotomic[BinNat._32, L32] =
     root2IsCyclotomic
 
+  // 12 * 3 = 36th roots
+  type L36 = Root3[L12]
+  implicit val root36CycSL: Cyclotomic[BinNat._36, L36] =
+    root3IsCyclotomic
+
   // there are roots 2 and higher
   // can be represented with rationals alone. the second root,
   // we need i, which cannot be (complex numbers)

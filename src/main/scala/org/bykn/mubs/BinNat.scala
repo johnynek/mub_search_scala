@@ -544,6 +544,10 @@ object BinNat {
   type _30 = Succ2[_14]
   type _31 = Succ1[_15]
   type _32 = Succ2[_15]
+  type _33 = Succ1[_16]
+  type _34 = Succ2[_16]
+  type _35 = Succ1[_17]
+  type _36 = Succ2[_17]
 
   // generate the above code
   def makeTypes(max: Int): String = {

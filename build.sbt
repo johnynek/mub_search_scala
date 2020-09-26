@@ -18,7 +18,8 @@ lazy val root = (project in file("."))
       "org.scalameta" %% "munit-scalacheck" % "0.7.12" % Test,
       "org.scalacheck" %% "scalacheck" % "1.14.3" % Test,
     ),
-    testFrameworks += new TestFramework("munit.Framework")
+    testFrameworks += new TestFramework("munit.Framework"),
+    test in assembly := {}
   )
 
 // Uncomment the following for publishing to Sonatype.

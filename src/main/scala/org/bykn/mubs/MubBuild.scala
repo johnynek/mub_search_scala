@@ -96,13 +96,15 @@ object MubBuild {
               val s0 = s.rangeFrom(vec + 1)
               val s1 = s0.filter(orthFn(vec, _))
 
-              if ((s1.size + vecs.length + 1) < dim) {
+              val nextLen = vecs.length + 1
+              if ((s1.size + nextLen) < dim) {
                 // we can't reach a complete set
                 None
               }
               else {
                 val v1 = vec :: vecs
-                Some((basis, (v1, s1)))
+                val s2 = if (nextLen >= dim) SortedSet.empty[Int] else s1
+                Some((basis, (v1, s2)))
               }
             }
             else {
@@ -159,7 +161,7 @@ object MubBuild {
           addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
 
         if (depth < 12) {
-          //println(s"#depth = $depth, basis = $i, width = $branchWidth")
+          println(s"#depth = $depth, basis = $i, width = $branchWidth")
         }
 
         val start = System.nanoTime()
@@ -168,7 +170,7 @@ object MubBuild {
         val diff = System.nanoTime() - start
 
         if (depth < 12) {
-          //println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
+          println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
         }
 
         if (isEmpty) None
@@ -238,13 +240,13 @@ object MubBuild {
       }
 
       makeBases(bases.map(_.map(vectToInt))) match {
-        case Some(bases) => bases
-        case None => throw new IllegalArgumentException(s"bases: $bases did not form a valid basis")
+        case Right(bases) => bases
+        case Left(message) => throw new IllegalArgumentException(s"bases: $bases did not form a valid basis.\n\n$message")
       }
     }
 
     // each Int is a vector encoded as a single Int
-    def makeBases(bases: List[List[Int]]): Option[Bases] = {
+    def makeBases(bases: List[List[Int]]): Either[String, Bases] = {
       bases.foreach { lst =>
         if (lst.length > dim) throw new IllegalArgumentException(s"expected basis size <= $dim: $lst")
         lst.foreach { v =>
@@ -267,7 +269,7 @@ object MubBuild {
       (bases ::: empty)
         .map(_.sorted)
         .sortBy(sortFn) match {
-        case (Nil | (Nil :: _)) => None
+        case (Nil | (Nil :: _)) => Left("did not expect empty, or empty lists early")
         case (h :: tail) :: brest =>
           def toSS(it: Iterator[Int]): SortedSet[Int] = {
             val ss = SortedSet.newBuilder[Int]
@@ -284,8 +286,11 @@ object MubBuild {
           }
 
         (tail :: brest).zipWithIndex.foldM(b0) { case (bases, (vectors, basis)) =>
-          vectors.foldM(b0) { (b, v) =>
-            addVector(b, basis, v)
+          vectors.foldM(bases) { (b, v) =>
+            addVector(b, basis, v) match {
+              case Some(b1) => Right(b1)
+              case None => Left(s"could not do: addVector($b, $basis, $v)")
+            }
           }
         }
       }

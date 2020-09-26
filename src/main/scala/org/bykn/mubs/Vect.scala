@@ -19,6 +19,12 @@ sealed abstract class Vect[L <: BinNat, N <: BinNat, A] {
   def cross[B1 <: BinNat, B2 <: BinNat](that: Vect[B1, N, A])(implicit m: BinNat.Mult.Aux[L, B1, B2], cs: Cyclotomic[N, A]): Vect[B2, N, A]
 
   def length: Int
+
+  def show(fn: A => String): String =
+    (0 until length)
+      .iterator
+      .map { i => fn(apply(i)) }
+      .mkString("Vect(", ", ", ")")
 }
 
 object Vect {
