@@ -41,3 +41,21 @@ pOrth = 0.513, pUb = 0.972
 real    4030m11.285s
 user    4126m31.030s
 sys     6m37.631s
+
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 6 --root 24 --mubs 3 --orth_tab tabs/orth_dim\=6_root\=24_exact --ub_tab tabs/unbiased_dim\=6_root\=24_exact
+# Space(dim = 6, roots = 24, standardCount = 7962624, realBits = 30, eps = 1.3052619222005159154840622789548901019374, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 0.0010486492894804527, pUb = 0.002426335841049383
+ found: None
+
+real    2m56.023s
+user    3m0.437s
+sys     0m0.317s
+
+oscar@oscar-XPS-13-7390:~/oss/mub_search_scala$ time ./mubs search --dim 6 --root 36 --mubs 3 --orth_tab tabs/orth_dim\=6_root\=36_exact --ub_tab tabs/unbiased_dim\=6_root\=36_exact
+# Space(dim = 6, roots = 36, standardCount = 60466176, realBits = 30, eps = 0.871557427476581735580642708374735513777, ubEpsIsTrivial = false, orthEpsIsTrivial = false)
+pOrth = 3.1571369752239663E-4, pUb = 2.0242722146014328E-4
+found: None
+
+real    1m31.408s
+user    1m36.287s
+sys     0m0.192s

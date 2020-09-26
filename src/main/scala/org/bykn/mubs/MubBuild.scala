@@ -161,7 +161,7 @@ object MubBuild {
           addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
 
         if (depth < 12) {
-          println(s"#depth = $depth, basis = $i, width = $branchWidth")
+          //println(s"#depth = $depth, basis = $i, width = $branchWidth")
         }
 
         val start = System.nanoTime()
@@ -170,7 +170,7 @@ object MubBuild {
         val diff = System.nanoTime() - start
 
         if (depth < 12) {
-          println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
+          //println(s"#depth = $depth, basis = $i, width = $branchWidth, time = ${diff.toDouble / 1e6}ms")
         }
 
         if (isEmpty) None
