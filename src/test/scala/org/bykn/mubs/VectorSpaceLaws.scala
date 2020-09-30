@@ -5,6 +5,7 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, Da
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 import spire.math.{Complex, Real}
+import scala.concurrent.Future
 
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
   override def scalaCheckTestParameters =
@@ -154,7 +155,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   val space2 = new VectorSpace.Space[BinNat._32, Cyclotomic.L32](2, 20)
 
   test("allMubVectors are all unbiased to each other and 0") {
-    val ubBitSet = space2.buildCache(space2.isUnbiased)
+    val ubBitSet = space2.buildCache(space2.isUnbiased(_, space2.eps))
     val nextFn = space2.nextFn(ubBitSet)
 
     (0 until space2.standardCount).foreach { v =>
@@ -165,7 +166,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
     (1 to 3).foreach { mubSize =>
       space2
-        .allMubVectors(space2.buildCache(space2.isUnbiased(_)), mubSize)
+        .allMubVectors(space2.buildCache(space2.isUnbiased(_, space2.eps)), mubSize)
         .foreach { mubSet =>
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()
@@ -308,7 +309,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
       VectorSpace.allDistinctPairs(basis)
         .forall { case (v1, v2) =>
-          space5.isOrth(dot2(v1, v2))
+          space5.isOrth(dot2(v1, v2), space5.eps)
         }
 
     def areApproxUnbiased(basis1: List[List[Complex[Real]]], basis2: List[List[Complex[Real]]]): Boolean = {
@@ -316,7 +317,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       basis1.forall { v1 =>
         basis2.forall { v2 =>
-          space5.isUnbiased(dot2(v1, v2))
+          space5.isUnbiased(dot2(v1, v2), space5.eps)
         }
       }
     }
@@ -418,27 +419,34 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
   test("we can round-trip tables") {
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
-    def law[N <: BinNat, C](space: VectorSpace.Space[N, C], isOrth: Boolean) = {
+    def law[N <: BinNat, C](space: VectorSpace.Space[N, C], isOrth: Boolean, tm: VectorSpace.TableMode) = {
       val baos = new ByteArrayOutputStream()
       val output = new DataOutputStream(baos)
 
-      VectorSpace.writeTable(space, isOrth, output)
+      VectorSpace.writeTable(space, isOrth, output, tm)
         .map { _ =>
 
           val input = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()))
           val fileBitSet = VectorSpace.readTable(space, isOrth, input)
 
-          val fn = if (isOrth) space.isOrth(_) else space.isUnbiased(_)
+          val eps = VectorSpace.TableMode.epsFor(tm, space)
+          val fn = if (isOrth) space.isOrth(_, eps) else space.isUnbiased(_, eps)
           assert(fileBitSet == space.buildCache(fn))
         }
     }
 
+    import VectorSpace.TableMode.{Quant1, Quant2, Exact}
+
     // space has a vector size of 8^5 = 2^20
-    for {
-      _ <- law(space, true)
-      _ <- law(space, false)
-      _ <- law(space2, true)
-      _ <- law(space2, false)
-    } yield ()
+    val params =
+      for {
+        s <- List(space, space2)
+        orth <- List(true, false)
+        mode <- List(Exact, Quant1, Quant2)
+      } yield (s, orth, mode)
+
+    Future.traverse(params) { case (space, isOrth, tm) =>
+      law(space, isOrth, tm)
+    }
   }
 }

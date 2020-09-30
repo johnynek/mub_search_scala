@@ -1,7 +1,8 @@
 package org.bykn.mubs
 
-import algebra.ring.CommutativeRing
+import algebra.ring.{CommutativeRing, Field}
 import cats.kernel.Order
+import spire.algebra.NRoot
 import spire.math.{Complex, Real, Rational, SafeLong, ConvertableFrom}
 import scala.reflect.ClassTag
 
@@ -93,6 +94,18 @@ object Cyclotomic {
     }
     // idx = size - 1
     into(size - 1) = conv(0, size - 1, size - 1)
+  }
+
+  def halfCos[A](cos: A)(implicit A: NRoot[A], F: Field[A]): A = {
+    val two = F.plus(F.one, F.one)
+
+    A.sqrt(F.div(F.one + cos, two))
+  }
+
+  def halfSinOfCos[A](cos: A)(implicit A: NRoot[A], F: Field[A]): A = {
+    val two = F.plus(F.one, F.one)
+
+    A.sqrt(F.div(F.one - cos, two))
   }
 
   implicit final class CommutativeRingSyntax[R](private val self: R) extends AnyVal {
@@ -453,12 +466,12 @@ object Cyclotomic {
       /**
        * cos(theta) = cos(C.theta/2) = sqrt((1 + cos(C.theta))/2)
        */
-      val reOmega: Real = ((Real.one + C.reOmega) / Real.two).sqrt
+      val reOmega: Real = halfCos(C.reOmega)
 
       /**
        * sin(theta) = sin(C.theta/2) = sqrt((1 - cos(C.theta))/2)
        */
-      val imOmega: Real = ((Real.one - C.reOmega) / Real.two).sqrt
+      val imOmega: Real = halfSinOfCos(C.reOmega)
 
       val roots: Vector[Root2[C]] = {
         val thisSize = C.roots.length * 2

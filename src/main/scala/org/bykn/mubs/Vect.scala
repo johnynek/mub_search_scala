@@ -25,6 +25,8 @@ sealed abstract class Vect[L <: BinNat, N <: BinNat, A] {
       .iterator
       .map { i => fn(apply(i)) }
       .mkString("Vect(", ", ", ")")
+
+  override def toString: String = show(_.toString)
 }
 
 object Vect {

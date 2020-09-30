@@ -2,8 +2,8 @@ package org.bykn.mubs
 
 import algebra.ring.Ring
 import cats.Eval
-import cats.data.NonEmptyList
-import com.monovore.decline.CommandApp
+import cats.data.{NonEmptyList, Validated}
+import com.monovore.decline.{CommandApp, Opts}
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -84,12 +84,25 @@ object VectorSpace {
 
       if (nroots == 1) dMinus1
       else {
-        Real.two * dMinus1 * (((Real.one - C.reOmega)/Real.two).sqrt)
+        Real.two * dMinus1 * Cyclotomic.halfSinOfCos(C.reOmega)
+      }
+    }
+
+    // this is the epsilon when only one side is quantized,
+    // which makes the angle at most half as large as befowe
+    val eps1: Real = {
+      val dMinus1 = Real(dim - 1)
+
+      if (nroots == 1) dMinus1
+      else {
+        val c1 = Cyclotomic.halfCos(C.reOmega)
+        val s1 = Cyclotomic.halfSinOfCos(c1)
+        Real.two * dMinus1 * s1
       }
     }
 
     override def toString: String = {
-      s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, eps = $eps, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+      s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, eps = $eps, eps1 = $eps1, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
     }
 
     // quantize a vector to the nearest root of unity
@@ -256,14 +269,11 @@ object VectorSpace {
      * ||<u', v'>| - |<u, v>|| <= eps
      * but |<u, v>| = 0
      */
-    def isOrth(r: Real): Boolean = {
+    def isOrth(r: Real, eps: Real): Boolean = {
       val diff = r.sqrt - eps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
-
-    def isOrthExact(r: Real): Boolean =
-      r == Real.zero
 
     // we know |a| <= d
     // so, ||a|- sqrt(d)| <= d + sqrt(d)
@@ -277,26 +287,21 @@ object VectorSpace {
      * ||<u', v'>| - |<u, v>|| <= eps
      * ||<u', v'>| - sqrt(d)| <= eps
      */
-    def isUnbiased(r: Real): Boolean = {
+    def isUnbiased(r: Real, eps: Real): Boolean = {
       val diff = (r.sqrt - realD.sqrt).abs - eps
       // this is the closest rational x such that r = x/2^p
       diff(realBits).signum <= 0
     }
 
-    // |<u, v>|^2 == d
-    def isUnbiasedExact(r: Real): Boolean = {
-      r == realD
-    }
-
     def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // acc <= 4d sin^2(pi / n)
-      isOrth(dotAbs2(v1, v2))
+      isOrth(dotAbs2(v1, v2), eps)
 
     def maybeUnbiased(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // |acc - d| <= 4d sin^2(pi / n)
-      isUnbiased(dotAbs2(v1, v2))
+      isUnbiased(dotAbs2(v1, v2), eps)
 
     // we own from and can mutate it
     @annotation.tailrec
@@ -828,18 +833,34 @@ object VectorSpace {
     f1.zip(f2).map(_ => ())
   }
 
+  sealed abstract class TableMode
+  object TableMode {
+    case object Exact extends TableMode
+    case object Quant2 extends TableMode
+    case object Quant1 extends TableMode
+
+    def epsFor[N <: BinNat, C](tm: TableMode, s: Space[N, C]): Real =
+      tm match {
+        case Exact => Real.zero
+        case Quant2 => s.eps
+        case Quant1 => s.eps1
+      }
+
+    val opts: Opts[TableMode] =
+      Opts.flag("exact", "don't weaken to approximate").as(Exact)
+        .orElse(Opts.flag("quant1", "quantize only one side").as(Quant1))
+        .orElse(Opts(Quant2))
+  }
+
   def writeTable[N <: BinNat, C](
     space: Space[N, C],
     isOrthTable: Boolean,
     dos: DataOutputStream,
-    exact: Boolean)(implicit ec: ExecutionContext): Future[Unit] = {
+    mode: TableMode)(implicit ec: ExecutionContext): Future[Unit] = {
+    val eps = TableMode.epsFor(mode, space)
     val fn =
-      (isOrthTable, exact) match {
-        case (true, false) => space.isOrth(_)
-        case (false, false) => space.isUnbiased(_)
-        case (true, true) => space.isOrthExact(_)
-        case (false, true) => space.isUnbiasedExact(_)
-      }
+      if (isOrthTable) space.isOrth(_, eps)
+      else space.isUnbiased(_, eps)
 
     space.buildCacheFuture(fn)
       .flatMap { bitset =>
@@ -960,6 +981,45 @@ object VectorSpace {
     }
   }
 
+  val realBits: Opts[Int] = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)
+
+  sealed abstract class Extend6 {
+    def readPath(isOrth: Boolean, path: Path): BitSet
+    def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit]
+  }
+
+  object Extend6 {
+    case class Dim12(space: Space[BinNat._12, Cyclotomic.L12]) extends Extend6 {
+      def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
+      def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
+        extend6[BinNat._12, BinNat._3, BinNat._4, Cyclotomic.L12](space, orthSet, mubSet)
+    }
+
+    case class Dim24(space: Space[BinNat._24, Cyclotomic.L24]) extends Extend6 {
+      def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
+      def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
+        extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthSet, mubSet)
+    }
+
+    case class Dim36(space: Space[BinNat._36, Cyclotomic.L36]) extends Extend6 {
+      def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
+      def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
+        extend6[BinNat._36, BinNat._9, BinNat._12, Cyclotomic.L36](space, orthSet, mubSet)
+    }
+
+    val opts: Opts[Extend6] =
+      Opts.option[Int]("root", "the root of unity we are working in 12, 24, 36")
+        .mapValidated { d =>
+          d match {
+            case 12 => Validated.valid({ bits: Int => Dim12(new Space[BinNat._12, Cyclotomic.L12](dim = 6, bits))})
+            case 24 => Validated.valid({ bits: Int => Dim24(new Space[BinNat._24, Cyclotomic.L24](dim = 6, bits))})
+            case 36 => Validated.valid({ bits: Int => Dim36(new Space[BinNat._36, Cyclotomic.L36](dim = 6, bits))})
+            case other => Validated.invalidNel(s"expected root of unity divisible by 12: 12, 24, 36, found: $other")
+          }
+        }
+        .ap(realBits)
+  }
+
   def extend6[N <: BinNat, K2 <: BinNat: BinNat.FromType, K3 <: BinNat: BinNat.FromType, C: ClassTag](
     space: Space[N, C],
     orthSet: BitSet,
@@ -1019,7 +1079,7 @@ object VectorSpace {
                   v2 <- thirdBasis.iterator
                 } yield C.abs2(v1.innerProd(v2))
 
-              val maxUb = ubs.maxBy { r => (Real(3) - r).abs }
+              val maxUb = ubs.maxBy { r => (Real(6).sqrt - r.sqrt).abs }
               println(
                 bVec
                   .iterator
@@ -1209,13 +1269,10 @@ object SearchApp extends CommandApp(
   name = "mub-search",
   header = "search for approximate mutually unbiased bases",
   main = {
-    import com.monovore.decline.Opts
-    import cats.data.Validated
     import VectorSpace.Space
 
     import cats.implicits._
 
-    val realBits = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)
     val dim = Opts.option[Int]("dim", "the dimension we are working in, should be small!").mapValidated { d =>
       if (d < 2) Validated.invalidNel(s"invalid dimension: $d, should be >= 2")
       else Validated.valid(d)
@@ -1283,7 +1340,7 @@ object SearchApp extends CommandApp(
         Opts.option[Int]("limit", "limit printing out to this many mubs").orNone
 
     val spaceOpt =
-      realBits
+      VectorSpace.realBits
         .product(dim)
         .product(space)
         .map { case ((b, d), fn) => fn(d, b) }
@@ -1341,14 +1398,14 @@ object SearchApp extends CommandApp(
         Opts.flag("orth", "build the orthTable").as(true)
           .orElse(Opts.flag("unbiased", "build the unbiasedness table").as(false)),
         Opts.option[Path]("output", "file to write to"),
-        Opts.flag("exact", "don't weaken to approximate").orFalse
+        VectorSpace.TableMode.opts
         )
-        .mapN { (space, cont, isOrth, path, exact) =>
+        .mapN { (space, cont, isOrth, path, tabMode) =>
           cont { implicit ec =>
             val output = new FileOutputStream(path.toFile)
             val gz = new GZIPOutputStream(output)
             val data = new DataOutputStream(gz)
-            val fut = VectorSpace.writeTable(space, isOrth, data, exact)
+            val fut = VectorSpace.writeTable(space, isOrth, data, tabMode)
             try Await.result(fut, Inf)
             finally {
               data.close()
@@ -1383,12 +1440,11 @@ object SearchApp extends CommandApp(
     }
 
     val extend6 =
-      (threads, tableOpts).mapN { case (cont, (orthPath, ubPath)) =>
+      (threads, tableOpts, VectorSpace.Extend6.opts).mapN { case (cont, (orthPath, ubPath), ex6) =>
         cont { implicit ec =>
-          val space = new Space[BinNat._24, Cyclotomic.L24](dim = 6, realBits = 30)
-          val orthBS = VectorSpace.readPath(space, true, orthPath)
-          val ubBS = VectorSpace.readPath(space, false, ubPath)
-          val f = VectorSpace.extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthBS, ubBS)
+          val orthBS = ex6.readPath(true, orthPath)
+          val ubBS = ex6.readPath(false, ubPath)
+          val f = ex6.run(orthSet = orthBS, mubSet = ubBS)
           Await.result(f, Inf)
         }
       }
