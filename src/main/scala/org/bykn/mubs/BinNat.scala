@@ -13,6 +13,9 @@ sealed trait BinNat
 
 object BinNat {
 
+  private val _1 = succ1(Zero) 
+  private val _2 = succ2(Zero) 
+
   /**
    * Values correspond the actual numbers of a given type
    */
@@ -34,6 +37,117 @@ object BinNat {
           // x^(2n + 2) = (x^(n + 1))^2
           val y = pow(p1.inc)
           y * y
+      }
+
+    def <(that: Value[BinNat]): Boolean =
+      (this: Value[BinNat]) match {
+        case Zero =>
+          that match {
+            case Zero => false
+            case _ => true
+          }
+        case B1(n) =>
+          // 2n + 1
+          that match {
+            case Zero => false
+            case B1(m) => n < m
+            case B2(m) =>
+              // 2n + 1 < 2m + 2
+              // if 2n < 2m + 1
+              // whicn is n <= m
+              (n < m) || (n == m)
+            }
+        case B2(n) =>
+          // 2n + 2
+          that match {
+            case Zero => false
+            case B1(m) =>
+              // 2n + 2 < 2m + 1
+              // is 2n < 2m - 1
+              // n <= (m - 1)
+              n < m
+            case B2(m) =>
+              // 2n + 2 < 2m + 2
+              n < m
+            }
+      }
+
+    def -(that: Value[BinNat]): Value[BinNat] =
+      (this: Value[BinNat]) match {
+        case Zero => Zero
+        case B1(n) =>
+          that match {
+            case Zero => this
+            case B1(m) =>
+              // 2n + 1 - (2m + 1) = 2(n - m)
+              _2 * (n - m)
+            case B2(m) =>
+              // 2n + 1 - (2m + 2) = 2(n - m) - 1
+              _2 * (n - m) - _1
+          }
+        case B2(n) =>
+          that match {
+            case Zero => this
+            case B1(m) =>
+              // 2n + 2 - (2m + 1) = 2(n - m) + 1
+              if (this < that) Zero
+              else succ1(n - m)
+            case B2(m) =>
+              // 2n + 2 - (2m + 2) = 2(n - m)
+              _2 * (n - m)
+          }
+      }
+
+    // n divmod m = (d, r)
+    // then n = d * m + r
+    // and r < n or m = 0
+    def divmod(that: Value[BinNat]): (Value[BinNat], Value[BinNat]) =
+      (this: Value[BinNat], that) match {
+        case (_, Zero) => (Zero, this)
+        case (Zero, _) => (Zero, Zero)
+        case (_, _) if this == that => (_1, Zero)
+        case (_, B1(Zero)) => (this, Zero)
+        case (B1(Zero), _) => (Zero, _1)
+        case (B2(Zero), _) =>
+          // 2 / n where n > 2
+          (Zero, _2)
+        case (B2(n), B2(m)) =>
+          // (2n1 + 2) / (2n2 + 2) = (n1 + 1) / (n2 + 1)
+          // if n mod m = x
+          // then 2n mod 2m = 2x
+          //
+          val (d, r) = n.inc.divmod(m.inc)
+          (d, _2 * r)
+        case (B1(n), _) =>
+          // (2n + 1) / that =
+          // (n + 1 + n) / that
+          val (d2, r2) = n.inc.divmod(that)
+          val (d1, r1) = n.divmod(that)
+          // n + 1 = d2 * that + r2
+          // n = d1 * that  + r1
+          // 2n + 1 = (d2 + d1)*that + (r2 + r1)
+          val r3 = r1 + r2
+          // r3 could be > that, if so, we overflow
+          if (r3 < that)
+            (d1 + d2, r3)
+          else
+            ((d1 + d2).inc, r3 - that)
+        case (B2(n), _) =>
+          // (2n + 2) / that
+          //  == 2 * ((n + 1) / that)
+          val (d, r) = n.inc.divmod(that)
+          // n + 1 = d2 * that + r2
+          // 2n + 2 = 2*d2*that + 2*r2
+          //
+          val r2 = _2 * r
+          // r3 could be > that, if so, we overflow
+          if (r2 < that)
+            (_2 * d , r2)
+          else {
+            // that <= r3 < 2that
+            // 0 <= r3 - that < that
+            (succ1(d), r2 - that)
+          }
       }
   }
 

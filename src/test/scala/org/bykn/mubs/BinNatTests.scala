@@ -8,12 +8,21 @@ class BinNatTests extends munit.ScalaCheckSuite {
   import BinNat._
   import FromType.value
 
+  override def scalaCheckTestParameters =
+    super.scalaCheckTestParameters
+      .withMinSuccessfulTests(20000)
+      .withMaxDiscardRatio(10)
+
+  val upTo16 =
+    (0 to 16).scanLeft(Zero: Value[BinNat]) { (b, _) => b.inc }.toVector
+
   def genValue(depth: Int): Gen[Value[BinNat]] = {
     if (depth <= 0) Gen.const(Zero)
     else {
       val rec = Gen.lzy(genValue(depth - 1))
 
       Gen.frequency(
+        (1, Gen.oneOf(upTo16.take(depth * 2))),
         (4, Gen.const(Zero)),
         (1, Gen.zip(rec, rec).map { case (a, b) => a + b }),
         (1, Gen.zip(rec, rec).map { case (a, b) => a * b }),
@@ -22,6 +31,7 @@ class BinNatTests extends munit.ScalaCheckSuite {
   }
 
   val genValue10: Gen[Value[BinNat]] = genValue(10)
+  val genValue2: Gen[Value[BinNat]] = genValue(4)
 
   property("inc is a homomorphism with toBigInt") {
     forAll(genValue10) { a =>
@@ -42,10 +52,45 @@ class BinNatTests extends munit.ScalaCheckSuite {
   }
 
   property("pow is a homomorphism with toBigInt") {
-    forAll(genValue10, genValue10) { (a, b) =>
+    forAll(genValue10, genValue2) { (a, b) =>
       assert(a.pow(b).toBigInt == (a.toBigInt.pow(b.toBigInt.toInt)))
     }
   }
+
+  property("- is a homomorphism with toBigInt") {
+    forAll(genValue10, genValue10) { (a, b) =>
+      val ba = a.toBigInt
+      val bb = b.toBigInt
+      if (ba >= bb) 
+        assert((a - b).toBigInt == (ba - bb))
+      else assert((a - b).toBigInt == BigInt(0), s"${a - b}")
+    }
+  }
+
+  property("< is a homomorphism with toBigInt") {
+    forAll(genValue10, genValue10) { (a, b) =>
+      val ba = a.toBigInt
+      val bb = b.toBigInt
+      assert((a < b) == (ba < bb))
+    }
+  }
+
+  property("divmod is lawful") {
+    forAll(genValue10, genValue10) { (a, b) =>
+      val (d, m) = a.divmod(b)
+      val res = b * d + m
+      assert(a == res, s"d = $d, m = $m")
+      if (BinNat.Zero < b) {
+        assert(a.toBigInt / b.toBigInt == d.toBigInt)
+        assert(m < b, s"d = $d, m = $m")
+      }
+      else {
+        assert(m == a)
+        assert(d == Zero)
+      }
+    }
+  }
+  
 
   property("toBigInt <-> valueFromBigInt is identity") {
     forAll(genValue10) { a =>
