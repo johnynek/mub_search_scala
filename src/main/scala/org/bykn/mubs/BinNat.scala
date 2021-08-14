@@ -55,21 +55,23 @@ object BinNat {
               // 2n + 1 < 2m + 2
               // if 2n < 2m + 1
               // whicn is n <= m
-              (n < m) || (n == m)
+              !(m < n)
             }
         case B2(n) =>
           // 2n + 2
           that match {
             case Zero => false
-            case B1(m) =>
+              // both cases result in the same
+              // condition:
+              //
               // 2n + 2 < 2m + 1
               // is 2n < 2m - 1
               // n <= (m - 1)
-              n < m
-            case B2(m) =>
+              //
               // 2n + 2 < 2m + 2
-              n < m
-            }
+            case B1(m) => n < m
+            case B2(m) => n < m
+          }
       }
 
     def -(that: Value[BinNat]): Value[BinNat] =
@@ -105,12 +107,19 @@ object BinNat {
       (this: Value[BinNat], that) match {
         case (_, Zero) => (Zero, this)
         case (Zero, _) => (Zero, Zero)
-        case (_, _) if this == that => (_1, Zero)
         case (_, B1(Zero)) => (this, Zero)
-        case (B1(Zero), _) => (Zero, _1)
+        case (B1(Zero), _) =>
+          that match {
+            case B1(Zero) => (_1, Zero)
+            case _ => (Zero, _1)
+          }
         case (B2(Zero), _) =>
-          // 2 / n where n > 2
-          (Zero, _2)
+          that match {
+            case B2(Zero) => (_1, Zero)
+            case _ =>
+              // 2 / n where n > 2
+              (Zero, _2)
+          }
         case (B2(n), B2(m)) =>
           // (2n1 + 2) / (2n2 + 2) = (n1 + 1) / (n2 + 1)
           // if n mod m = x
