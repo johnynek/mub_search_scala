@@ -11,10 +11,48 @@ package org.bykn.mubs
  */
 sealed trait BinNat
 
+import java.util.Random
+import java.security.SecureRandom
+
 object BinNat {
 
-  private val _1 = succ1(Zero) 
-  private val _2 = succ2(Zero) 
+  val _1 = succ1(Zero) 
+  val _2 = succ2(Zero) 
+
+  trait BoolGen {
+    def nextBoolean(): Boolean
+  }
+
+  object BoolGen {
+    def fromRandom(r: Random): BoolGen =
+      new BoolGen {
+        def nextBoolean() = r.nextBoolean()
+      }
+
+    def fromSecureRandom(sr: SecureRandom): BoolGen =
+      new BoolGen {
+        val buf = new Array[Byte](32)
+        val maxPos = 32 * 8
+        var pos = maxPos
+
+        def nextBoolean(): Boolean = {
+          if (pos < maxPos) {
+            val byte = pos >> 3
+            val bit = pos & 0x7
+            pos += 1
+            ((buf(byte).toInt >> bit) & 1) == 1
+          }
+          else {
+            sr.nextBytes(buf)
+            pos = 0
+            nextBoolean()
+          }
+        }
+      }
+
+    def secure(): BoolGen =
+      fromSecureRandom(SecureRandom.getInstanceStrong())
+  }
 
   /**
    * Values correspond the actual numbers of a given type
@@ -28,11 +66,14 @@ object BinNat {
     def *(that: Value[BinNat]): Value[BinNat]
     def pow(that: Value[BinNat]): Value[BinNat] =
       that match {
-        case Zero => succ1(Zero)
+        case Zero => _1
         case B1(p1) =>
-          // x^(2n + 1) = x * (x^n)^2
-          val y = pow(p1)
-          this * y * y
+          if (p1 eq Zero) this
+          else {
+            // x^(2n + 1) = x * (x^n)^2
+            val y = pow(p1)
+            this * y * y
+          }
         case B2(p1) =>
           // x^(2n + 2) = (x^(n + 1))^2
           val y = pow(p1.inc)
@@ -82,10 +123,10 @@ object BinNat {
             case Zero => this
             case B1(m) =>
               // 2n + 1 - (2m + 1) = 2(n - m)
-              _2 * (n - m)
+              (n - m).times2
             case B2(m) =>
               // 2n + 1 - (2m + 2) = 2(n - m) - 1
-              _2 * (n - m) - _1
+              (n - m).times2 - _1
           }
         case B2(n) =>
           that match {
@@ -96,10 +137,21 @@ object BinNat {
               else succ1(n - m)
             case B2(m) =>
               // 2n + 2 - (2m + 2) = 2(n - m)
-              _2 * (n - m)
+              (n - m).times2
           }
       }
 
+    def times2: Value[BinNat] =
+      (this: Value[BinNat]) match {
+        case Zero => Zero
+        case B1(n) =>
+          // (2n + 1) * 2 = 2(2n) + 2
+          succ2(n.times2)
+        case B2(n) =>
+          // (2n + 2) * 2 = 4n + 4
+          // 2(2n + 1) + 2
+          succ2(succ1(n))
+      }
     // n divmod m = (d, r)
     // then n = d * m + r
     // and r < n or m = 0
@@ -126,7 +178,7 @@ object BinNat {
           // then 2n mod 2m = 2x
           //
           val (d, r) = n.inc.divmod(m.inc)
-          (d, _2 * r)
+          (d, r.times2)
         case (B1(n), _) =>
           // (2n + 1) / that =
           // (n + 1 + n) / that
@@ -148,16 +200,259 @@ object BinNat {
           // n + 1 = d2 * that + r2
           // 2n + 2 = 2*d2*that + 2*r2
           //
-          val r2 = _2 * r
+          val r2 = r.times2
           // r3 could be > that, if so, we overflow
           if (r2 < that)
-            (_2 * d , r2)
+            (d.times2 , r2)
           else {
             // that <= r3 < 2that
             // 0 <= r3 - that < that
             (succ1(d), r2 - that)
           }
       }
+
+    def /(that: Value[BinNat]): Value[BinNat] =
+      this.divmod(that)._1
+
+    def %(that: Value[BinNat]): Value[BinNat] =
+      // this could be optimized
+      (this: Value[BinNat], that) match {
+        case (_, Zero) => this
+        case (Zero, _) | (_, B1(Zero)) => Zero
+        case (B1(Zero), _) =>
+          that match {
+            case B1(Zero) => Zero
+            case _ => _1
+          }
+        case (B2(Zero), _) =>
+          that match {
+            case B2(Zero) => Zero
+            case _ =>
+              // 2 % n where n > 2
+              _2
+          }
+        case (B2(n), B2(m)) =>
+          // (2n1 + 2) / (2n2 + 2) = (n1 + 1) / (n2 + 1)
+          // if n mod m = x
+          // then 2n mod 2m = 2x
+          //
+          (n.inc % m.inc).times2
+        case (B1(n), _) =>
+          // (2n + 1) / that =
+          // (n + 1 + n) / that
+          val r2 = n.inc % that
+          val r1 = n % that
+          // n + 1 = d2 * that + r2
+          // n = d1 * that  + r1
+          // 2n + 1 = (d2 + d1)*that + (r2 + r1)
+          val r3 = r1 + r2
+          // r3 could be > that, if so, we overflow
+          if (r3 < that) r3
+          else (r3 - that)
+        case (B2(n), _) =>
+          // (2n + 2) / that
+          //  == 2 * ((n + 1) / that)
+          val r = n.inc % that
+          // n + 1 = d2 * that + r2
+          // 2n + 2 = 2*d2*that + 2*r2
+          //
+          val r2 = r.times2
+          // r3 could be > that, if so, we overflow
+          if (r2 < that) r2
+          else {
+            // that <= r3 < 2that
+            // 0 <= r3 - that < that
+            r2 - that
+          }
+      }
+
+    // gcd(a, b) = n
+    // means a = ka * n, b = kb * n
+    // and gcd(a/n, b/n) == 1
+    // if (a == 0 && b == 0) 0
+    def gcd(that: Value[BinNat]): Value[BinNat] =
+      (this: Value[BinNat], that) match {
+        case (a, Zero) => a
+        case (Zero, b) => b
+        case (a, b) =>
+          @annotation.tailrec
+          def loop(a: Value[BinNat], b: Value[BinNat]): Value[BinNat] =
+            if (a < b) loop(b, a)
+            else {
+              val r = a % b
+              // if the remainder is 0, then b divides a
+              if (r == Zero) b
+              else loop(b, r)
+            }
+          loop(a, b)
+      }
+
+    // some as (this ^ p) % m
+    def powMod(p: Value[BinNat], m: Value[BinNat]): Value[BinNat] =
+      if (m eq Zero) this.pow(p)
+      else if (m == _1) Zero
+      else {
+        // reduce down to < m to start
+        val self = this % m
+
+        def loop(p: Value[BinNat]): Value[BinNat] = {
+          p match {
+            case Zero => _1
+            case B1(n) =>
+              if (n eq Zero) self
+              else {
+                // this ^ (2n + 1) % m =
+                // this * (this^2n) % m
+                // this * (this ^ n) ^2 % m
+                val half = loop(n)
+                // I think we need timesMod to make this fast
+                (self * ((half * half) % m)) % m
+              }
+            case B2(n) =>
+              // this ^ (2n + 2) % m =
+              // (this^2(n + 1)) % m
+              // (this ^ (n+1)) ^2 % m
+              val half = loop(n.inc)
+              (half * half) % m
+          }
+        }
+
+        loop(p)
+      }
+
+      /**
+       * see: https://en.wikipedia.org/wiki/Miller–Rabin_primality_test
+       */
+      def millerRabinPrime(rand: BoolGen, k: Int): Boolean =
+        (this: Value[BinNat]) match {
+          case Zero | B1(Zero) => false
+          case B2(Zero) | B1(B1(Zero)) => true // 2 or 3
+          case B2(_) => false // evens 4 or more is not prime
+          case B1(m) =>
+            // this >= 5
+            type V = Value[BinNat]
+            // n = 2m + 1
+            // write n = 2^r * d + 1
+            def comp(m: V): (V, V) =
+              m match {
+                case B2(x) =>
+                  // m = 2^r * d = 2(n + 1)
+                  val (r1, d) = comp(x.inc)
+                  (r1.inc, d)
+                case notEven =>
+                  // r = 0, this is d
+                  (Zero, notEven)
+              }
+
+            val _4 = _2.times2
+            val this_4 = this - _4
+            val _n1 = this - _1
+            val (r, d) = comp(m)
+            // n = this = 2^r * d + 1
+            @annotation.tailrec
+            def loop(k: Int): Boolean =
+              if (k <= 0) true
+              else {
+                // [2, n - 2] =
+                // 2 + [0, n - 4]
+                val a = _2 + BinNat.random(rand, this_4)
+                val x = a.powMod(d, this)
+                if ((x == _1) || (x == _n1)) loop(k - 1)
+                else {
+                  var r0 = r
+                  var x0 = x
+                  var isComposite = true
+                  while (r0 ne Zero) {
+                    x0 = (x0 * x0) % this
+                    if (x0 == _n1) {
+                      // we continue on the loop
+                      isComposite = false
+                      r0 = Zero
+                    }
+                    else {
+                      r0 = r0 - _1
+                    }
+                  }
+                  if (isComposite) false
+                  else loop(k - 1)
+                }
+              }
+
+            loop(k)
+        }
+
+      /**
+       * this < 2^bitCount
+       * if this != 0, thens
+       * 2^(bitCount - 1) <= this
+       */
+      def bitCount: Value[BinNat] =
+        (this: Value[BinNat]) match {
+          case Zero => Zero
+          case B2(n) =>
+            // 2(n + 1)
+            n.inc.bitCount.inc
+          case _ =>
+            (this / _2).bitCount.inc
+        }
+
+  }
+
+  // compute a random Value[BinNat] x such that 0 <= x <= r
+  def random(r: BoolGen, upper: Value[BinNat]): Value[BinNat] = {
+    upper match {
+      case Zero => Zero
+      case B1(n) => 
+        // x <= 2n + 1
+        // x < 2n + 2
+        // so there are n + 1 items in each bucket
+        // [0, ... n, n + 1 ... 2n + 1]
+        // either pick on the left or right half
+        val x = random(r, n) 
+        if (r.nextBoolean())  x
+        else (x + n.inc)
+      case _ =>
+        // we have an odd number here [0, 1... 2n + 2]
+        def genRandIntBits(bits: Value[BinNat], acc: Value[BinNat]): Value[BinNat] = {
+          if (bits eq Zero) acc
+          else {
+            val shift = acc.times2
+            val acc1 =
+              if (r.nextBoolean()) shift.inc
+              else shift
+            genRandIntBits(bits - _1, acc1)
+          }
+        }
+        val ex = upper.inc
+        val num = genRandIntBits(ex.bitCount, Zero)
+        if (num < ex) num
+        else {
+          // we failed to generate in the range, just try again
+          random(r, upper)
+        }
+    }
+  }
+
+  // generate a random prime in [2^(bits - 1) + 1, 2^bits - 1]
+  // with probability at most (1/4)^confidence probability of error
+  // using confidence = 64 to 128 is probably a good choice
+  def randomPrime(r: BoolGen, bits: Int, confidence: Int): Value[BinNat] = {
+    if (bits <= 2) // return 2 or 3, the only 2 bit primes
+      if (r.nextBoolean()) _2 else succ1(_1)
+    else {
+      val bitsV1 = valueFromBigInt(bits - 1)
+      val low = _2.pow(bitsV1).inc
+      val high = _2.pow(bitsV1.inc) - _1
+      val diff = high - low
+
+      def loop(): Value[BinNat] = {
+        val candidate = random(r, diff) + low
+        if (candidate.millerRabinPrime(r, confidence)) candidate
+        else loop()
+      }
+
+      loop()
+    }
   }
 
   case object Zero extends Value[_0] {

@@ -2,6 +2,7 @@ package org.bykn.mubs
 
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+import java.util.Random
 
 class BinNatTests extends munit.ScalaCheckSuite {
 
@@ -31,7 +32,7 @@ class BinNatTests extends munit.ScalaCheckSuite {
   }
 
   val genValue10: Gen[Value[BinNat]] = genValue(10)
-  val genValue2: Gen[Value[BinNat]] = genValue(4)
+  val genValue2: Gen[Value[BinNat]] = genValue(3)
 
   property("inc is a homomorphism with toBigInt") {
     forAll(genValue10) { a =>
@@ -54,6 +55,23 @@ class BinNatTests extends munit.ScalaCheckSuite {
   property("pow is a homomorphism with toBigInt") {
     forAll(genValue10, genValue2) { (a, b) =>
       assert(a.pow(b).toBigInt == (a.toBigInt.pow(b.toBigInt.toInt)))
+    }
+  }
+
+  property("powMod matches pow + %") {
+    forAll(genValue10, genValue2, genValue10) { (a, p, m) =>
+      assert(a.powMod(p, m) == (a.pow(p) % m))
+    }
+  }
+
+  property("powMod matches BigInt modPow") {
+    forAll(genValue10, genValue2, genValue10) { (a, p, m) =>
+      if (m != BinNat.Zero) {
+        assert(a.powMod(p, m).toBigInt == a.toBigInt.modPow(p.toBigInt, m.toBigInt))
+      }
+      else {
+        assert(a.powMod(p, m) == a.pow(p))
+      }
     }
   }
 
@@ -90,11 +108,80 @@ class BinNatTests extends munit.ScalaCheckSuite {
       }
     }
   }
+
+  property("divmod._2 == %") {
+    forAll(genValue10, genValue10) { (a, b) =>
+      assert(a.divmod(b)._2 == (a % b))
+    }
+  }
+
+  property("gcd is a homomorphism with toBigInt") {
+    forAll(genValue10, genValue10) { (a, b) =>
+      val bn = a.gcd(b)
+      val ba = a.toBigInt
+      val bb = b.toBigInt
+      val bg = ba.gcd(bb)
+      assert(bn.toBigInt == bg, s"$bn != $bg")
+
+      val gcd1 = (a / bn).gcd(b / bn)
+      if (a == BinNat.Zero && b == BinNat.Zero) {
+        assert(gcd1 == BinNat.Zero)
+      }
+      else {
+        assert(gcd1 == BinNat.Zero.inc)
+      }
+    }
+  }
+
+  property("bitCount is lawful") {
+    forAll(genValue10) { b =>
+      val bc = b.bitCount
+      assert(b < BinNat._2.pow(bc))
+      val lower = BinNat._2.pow(bc - BinNat._1)
+      assert(b == BinNat.Zero || lower < b || (lower == b))
+    }
+  }
   
 
   property("toBigInt <-> valueFromBigInt is identity") {
     forAll(genValue10) { a =>
       assert(valueFromBigInt(a.toBigInt) == a)
+    }
+  }
+
+  property("_2 * x == x.times2") {
+    forAll(genValue10) { a =>
+      assert(_2 * a == a.times2)
+    }
+  }
+
+  property("random generates in bounds") {
+    forAll(genValue10, Gen.choose(Long.MinValue, Long.MaxValue)) { (n, seed) =>
+      val rand = BinNat.BoolGen.fromRandom(new Random(seed))
+
+      val n1 = BinNat.random(rand, n)
+      assert(n1 < n.inc, s"$n1 >= $n + 1")
+    }
+  }
+
+  property("isProbablyPrime matches") {
+    forAll(genValue10, Gen.choose(Long.MinValue, Long.MaxValue), Gen.choose(0, 50)) { (n, seed, k) =>
+      val rand = BinNat.BoolGen.fromRandom(new Random(seed))
+      assert(n.millerRabinPrime(rand, 2*k + 10) == n.toBigInt.isProbablePrime(2*k + 10))
+    }
+  }
+
+  /*
+   * this either doesn't work or is insanely slow
+  */
+  property("generating random primes works") {
+    forAll(Gen.choose(0, 10), Gen.choose(Long.MinValue, Long.MaxValue)) { (bits, seed) =>
+      val rand = BinNat.BoolGen.fromRandom(new Random(seed))
+
+      val conf = 10
+      val p = BinNat.randomPrime(rand, bits, conf)
+      assert(p.toBigInt.isProbablePrime(conf))
+      assert(p.millerRabinPrime(rand, conf))
     }
   }
 
