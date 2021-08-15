@@ -155,6 +155,12 @@ class BinNatTests extends munit.ScalaCheckSuite {
     }
   }
 
+  property("x.dec = x - _1") {
+    forAll(genValue10) { x =>
+      assert(x.dec == (x - _1))
+    }
+  }
+
   property("random generates in bounds") {
     forAll(genValue10, Gen.choose(Long.MinValue, Long.MaxValue)) { (n, seed) =>
       val rand = BinNat.BoolGen.fromRandom(new Random(seed))
@@ -175,11 +181,13 @@ class BinNatTests extends munit.ScalaCheckSuite {
    * this either doesn't work or is insanely slow
   */
   property("generating random primes works") {
-    forAll(Gen.choose(0, 10), Gen.choose(Long.MinValue, Long.MaxValue)) { (bits, seed) =>
+    forAll(Gen.choose(2, 8), Gen.choose(Long.MinValue, Long.MaxValue)) { (bits0, seed) =>
+      val bits = math.max(bits0, 2)
       val rand = BinNat.BoolGen.fromRandom(new Random(seed))
 
       val conf = 10
       val p = BinNat.randomPrime(rand, bits, conf)
+      assert(p.bitCount == valueFromBigInt(bits), s"${p.bitCount} != $bits")
       assert(p.toBigInt.isProbablePrime(conf))
       assert(p.millerRabinPrime(rand, conf))
     }

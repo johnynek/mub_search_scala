@@ -126,7 +126,7 @@ object BinNat {
               (n - m).times2
             case B2(m) =>
               // 2n + 1 - (2m + 2) = 2(n - m) - 1
-              (n - m).times2 - _1
+              (n - m).times2.dec
           }
         case B2(n) =>
           that match {
@@ -346,7 +346,7 @@ object BinNat {
 
             val _4 = _2.times2
             val this_4 = this - _4
-            val _n1 = this - _1
+            val _n1 = this.dec
             val (r, d) = comp(m)
             // n = this = 2^r * d + 1
             @annotation.tailrec
@@ -370,7 +370,7 @@ object BinNat {
                       r0 = Zero
                     }
                     else {
-                      r0 = r0 - _1
+                      r0 = r0.dec
                     }
                   }
                   if (isComposite) false
@@ -396,6 +396,21 @@ object BinNat {
             (this / _2).bitCount.inc
         }
 
+      def dec: Value[BinNat] =
+        (this: Value[BinNat]) match {
+          case Zero => Zero
+          case B1(n) =>
+            n match {
+              case Zero => Zero
+              case _ =>
+                // (2n + 1) - 1
+                // = 2(n - 1) + 2
+                succ2(n.dec)
+            }
+          case B2(n) =>
+            // 2n + 2 - 1 = 2n + 1
+            succ1(n)
+        }
   }
 
   // compute a random Value[BinNat] x such that 0 <= x <= r
@@ -420,7 +435,7 @@ object BinNat {
             val acc1 =
               if (r.nextBoolean()) shift.inc
               else shift
-            genRandIntBits(bits - _1, acc1)
+            genRandIntBits(bits.dec, acc1)
           }
         }
         val ex = upper.inc
@@ -440,9 +455,12 @@ object BinNat {
     if (bits <= 2) // return 2 or 3, the only 2 bit primes
       if (r.nextBoolean()) _2 else succ1(_1)
     else {
-      val bitsV1 = valueFromBigInt(bits - 1)
-      val low = _2.pow(bitsV1).inc
-      val high = _2.pow(bitsV1.inc) - _1
+      def pow2(n: Int, acc: Value[BinNat]): Value[BinNat] =
+        if (n <= 0) acc
+        else pow2(n - 1, acc.times2)
+
+      val low = pow2(bits - 1, _1).inc
+      val high = pow2(bits, _1).dec
       val diff = high - low
 
       def loop(): Value[BinNat] = {
