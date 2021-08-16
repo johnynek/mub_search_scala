@@ -161,10 +161,8 @@ object BinNat {
         case (Zero, _) => (Zero, Zero)
         case (_, B1(Zero)) => (this, Zero)
         case (B1(Zero), _) =>
-          that match {
-            case B1(Zero) => (_1, Zero)
-            case _ => (Zero, _1)
-          }
+          // we know that > 1
+          (Zero, _1)
         case (B2(Zero), _) =>
           that match {
             case B2(Zero) => (_1, Zero)
@@ -181,18 +179,22 @@ object BinNat {
           (d, r.times2)
         case (B1(n), _) =>
           // (2n + 1) / that =
-          // (n + 1 + n) / that
-          val (d2, r2) = n.inc.divmod(that)
-          val (d1, r1) = n.divmod(that)
-          // n + 1 = d2 * that + r2
-          // n = d1 * that  + r1
-          // 2n + 1 = (d2 + d1)*that + (r2 + r1)
-          val r3 = r1 + r2
-          // r3 could be > that, if so, we overflow
-          if (r3 < that)
-            (d1 + d2, r3)
-          else
-            ((d1 + d2).inc, r3 - that)
+          // 2n / that = d1 m + r1
+          // 1 / that = d2 m + r2 = 0*m + 1 (because that > 1) 
+          // 
+          // 2n/that = 2*(n/that) =
+          // n/that = d3 m + r3
+          val (d3, r3) = n.divmod(that)
+          var d = d3.times2
+          // r = 2r3 + 1 = succ1(r3)
+          var r: Value[BinNat] = succ1(r3)
+          // since r3 < that, 2r3 + 1 < 2that + 1
+          // so we could have to subtract that twice
+          while(!(r < that)) {
+            r = r - that
+            d = d.inc
+          }
+          (d, r)
         case (B2(n), _) =>
           // (2n + 2) / that
           //  == 2 * ((n + 1) / that)
