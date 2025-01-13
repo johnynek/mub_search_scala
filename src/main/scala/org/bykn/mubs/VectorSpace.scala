@@ -1121,7 +1121,7 @@ object VectorSpace {
 
       // now compute the gaps
       Future.traverse(pairs) { case (v1, v2) =>
-        Future(space.quantizationBoundGap(v1, v2).doubleValue())
+        Future(space.quantizationBoundGap(v1, v2).doubleValue)
       }
       .map { gaps =>
 
@@ -1251,7 +1251,7 @@ object VectorSpace {
 
       // now compute the gaps
       Future.traverse(pairs) { case (v1, v2) =>
-        Future(quantizationBoundGap2(n, k, v1, v2).doubleValue())
+        Future(quantizationBoundGap2(n, k, v1, v2).doubleValue)
       }
       .map { gaps =>
 
