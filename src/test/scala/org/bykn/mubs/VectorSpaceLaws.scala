@@ -45,10 +45,16 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     loop(0)
   }
 
-  test("eps = 2 (d - 1) sin(pi/n) when n > 1, else (d - 1)") {
+  test("epsOrth = 2 d sin(pi/(2n))") {
     val expectedEps =
-      Real(2 * (dim - 1)) * Real.sin(Real.pi / space.C.roots.length)
-    assert(space.eps == expectedEps, s"${space.eps} != $expectedEps")
+      Real(2 * dim) * Real.sin(Real.pi / (2 * space.C.roots.length))
+    assert(space.epsOrth == expectedEps, s"${space.epsOrth} != $expectedEps")
+  }
+
+  test("epsUb = 2 sqrt(d) sin(pi/(2n))") {
+    val expectedEps =
+      Real(2) * Real(dim).sqrt * Real.sin(Real.pi / (2 * space.C.roots.length))
+    assert(space.epsUb == expectedEps, s"${space.epsUb} != $expectedEps")
   }
 
   property("trace is invariant to shuffle") {
@@ -156,7 +162,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
   // this test is very slow
   test("allMubVectors are all unbiased to each other and 0".ignore) {
-    val ubBitSet = space2.buildCache(space2.isUnbiased(_, space2.eps))
+    val ubBitSet = space2.buildCache(space2.isUnbiased(_, space2.epsUb))
     val nextFn = space2.nextFn(ubBitSet)
 
     (0 until space2.standardCount).foreach { v =>
@@ -167,7 +173,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
     (1 to 3).foreach { mubSize =>
       space2
-        .allMubVectors(space2.buildCache(space2.isUnbiased(_, space2.eps)), mubSize)
+        .allMubVectors(space2.buildCache(space2.isUnbiased(_, space2.epsUb)), mubSize)
         .foreach { mubSet =>
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()
@@ -310,7 +316,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     def isApproxOrthBasis(basis: List[List[Complex[Real]]]): Boolean =
       VectorSpace.allDistinctPairs(basis)
         .forall { case (v1, v2) =>
-          space5.isOrth(dot2(v1, v2), space5.eps)
+          space5.isOrth(dot2(v1, v2), space5.epsOrth)
         }
 
     def areApproxUnbiased(basis1: List[List[Complex[Real]]], basis2: List[List[Complex[Real]]]): Boolean = {
@@ -318,7 +324,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       basis1.forall { v1 =>
         basis2.forall { v2 =>
-          space5.isUnbiased(dot2(v1, v2), space5.eps)
+          space5.isUnbiased(dot2(v1, v2), space5.epsUb)
         }
       }
     }
@@ -431,20 +437,20 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           val input = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()))
           val fileBitSet = VectorSpace.readTable(space, isOrth, input)
 
-          val eps = VectorSpace.TableMode.epsFor(tm, space)
+          val eps = VectorSpace.TableMode.epsFor(isOrth, tm, space)
           val fn = if (isOrth) space.isOrth(_, eps) else space.isUnbiased(_, eps)
           assert(fileBitSet == space.buildCache(fn))
         }
     }
 
-    import VectorSpace.TableMode.{Quant1, Quant2, Exact}
+    import VectorSpace.TableMode.{Quant, Exact}
 
     // space has a vector size of 8^5 = 2^20
     val params =
       for {
         s <- List(space, space2)
         orth <- List(true, false)
-        mode <- List(Exact, Quant1, Quant2)
+        mode <- List(Exact, Quant)
       } yield (s, orth, mode)
 
     Future.traverse(params) { case (space, isOrth, tm) =>

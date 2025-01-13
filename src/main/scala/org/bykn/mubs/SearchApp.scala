@@ -3,7 +3,7 @@ package org.bykn.mubs
 import cats.data.{NonEmptyList, Validated}
 import com.monovore.decline.{CommandApp, Opts}
 import java.io.{DataInputStream, DataOutputStream, FileInputStream, FileOutputStream, InputStream, OutputStream}
-import java.nio.file.Path
+import java.nio.file.{Path, Paths}
 import java.util.concurrent.Executors
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 import scala.concurrent.duration.Duration.Inf
@@ -78,7 +78,26 @@ object SearchApp extends CommandApp(
 
     val orthTab = Opts.option[Path]("orth_tab", "path to orthogonality table")
     val ubTab = Opts.option[Path]("ub_tab", "path to unbiasedness table")
-    val tableOpts: Opts[(Path, Path)] = orthTab.product(ubTab)
+    val tableOpts: Opts[(Int, Int) => (Path, Path)] = {
+      val dirOpt =
+        (Opts.option[Path]("tab_dir", "directory to find tables in orth_dim=${dim}_root=${root}_{quant|exact} format, default = tabs")
+          .orElse(Opts(Paths.get("tabs"))),
+          VectorSpace.TableMode.opts)
+          .mapN { (tabDir, mode) =>
+            (dim: Int, root: Int) => {
+              def p(kind: String) =
+                tabDir.resolve(s"${kind}_dim=${dim}_root=${root}_${mode.name}")
+
+              (p("orth"), p("unbiased"))
+            }
+          }
+      
+      dirOpt.orElse {
+        orthTab.product(ubTab)
+          .map(paths => (dim: Int, root: Int) => paths)
+      }
+    }
+
 
     val limitOpt =
         Opts.option[Int]("limit", "limit printing out to this many mubs").orNone
@@ -91,8 +110,9 @@ object SearchApp extends CommandApp(
 
     val search =
       (spaceOpt, goalMubs.orNone, threads, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse)
-        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), showCount) =>
+        .mapN { case (space, mubsOpt, cont, pathFn, showCount) =>
           // dim is the most we can get
+          val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
           val mubs = mubsOpt.getOrElse(space.dim)
 
           cont { implicit ec =>
@@ -104,7 +124,8 @@ object SearchApp extends CommandApp(
 
     val search0 =
       (spaceOpt, goalMubs.orNone, threads, tableOpts, limitOpt)
-        .mapN { case (space, mubsOpt, cont, (orthPath, ubPath), limit) =>
+        .mapN { case (space, mubsOpt, cont, pathFn, limit) =>
+          val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
           // dim is the most we can get
           val mubs = mubsOpt.getOrElse(space.dim)
 
@@ -184,8 +205,10 @@ object SearchApp extends CommandApp(
     }
 
     val extend6 =
-      (threads, tableOpts, VectorSpace.Extend6.opts).mapN { case (cont, (orthPath, ubPath), ex6) =>
+      (threads, tableOpts, VectorSpace.Extend6.opts).mapN { case (cont, pathFn, ex6) =>
         cont { implicit ec =>
+          val space = ex6.space
+          val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
           val orthBS = ex6.readPath(true, orthPath)
           val ubBS = ex6.readPath(false, ubPath)
           val f = ex6.run(orthSet = orthBS, mubSet = ubBS)

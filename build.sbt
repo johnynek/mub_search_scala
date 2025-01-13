@@ -18,6 +18,10 @@ lazy val root = (project in file("."))
       "org.scalameta" %% "munit-scalacheck" % "0.7.12" % Test,
       "org.scalacheck" %% "scalacheck" % "1.14.3" % Test,
     ),
+    scalacOptions ++= Seq(
+      "-opt:l:inline",
+      "-opt-inline-from:**"
+    ),
     testFrameworks += new TestFramework("munit.Framework"),
     assembly / test := {}
   )

@@ -65,43 +65,43 @@ object VectorSpace {
     val realD: Real = Real(dim)
 
     /**
-     * This is 2d * sin(pi/n) when n>1, else 2d
-     * we use d' = d - 1 because we can always
-     * standardize the original vectors to have
-     * 1 as the last element. 1 is a root of
-     * unity, so there is no difference on that
-     * axis
+     * See: https://chatgpt.com/share/678566bc-9864-8010-96c2-58b6477a2e2c
+     * 
+     * This is 2d * sin(pi/(2n)) when n>=1
+     * when we are looking for othogonal vectors
      */
-    val eps: Real = {
+    val epsOrth: Real = {
       // theta = 2 pi / n
       // C.omega = e^(2 pi i / n)
       // C.omega ^(1/2) = e^(pi i /n)
-      // sin(theta/2) = ((1 - cos(theta))/2).sqrt
-      // 2d sin(theta/2) = 2d((1 - re(C.omega))/2).sqrt
+      // 2 d sin(theta/4) = ((1 - cos(theta/2))/2).sqrt
 
-      val dMinus1 = Real(dim - 1)
-
-      if (nroots == 1) dMinus1
-      else {
-        Real.two * dMinus1 * Cyclotomic.halfSinOfCos(C.reOmega)
-      }
+      val cos = C.reOmega
+      val halfCos = Cyclotomic.halfCos(cos)
+      val quartSin = Cyclotomic.halfSinOfCos(halfCos)
+      Real.two * realD * quartSin
     }
 
-    // this is the epsilon when only one side is quantized,
-    // which makes the angle at most half as large as befowe
-    val eps1: Real = {
-      val dMinus1 = Real(dim - 1)
+    /**
+     * See: https://chatgpt.com/share/678566bc-9864-8010-96c2-58b6477a2e2c
+     * 
+     * This is 2 sqrt(d) * sin(pi/(2n)) when n>=1
+     * when we are looking for unbiased vectors
+     */
+    val epsUb: Real = {
+      // theta = 2 pi / n
+      // C.omega = e^(2 pi i / n)
+      // C.omega ^(1/2) = e^(pi i /n)
+      // 2 sqrt(d) sin(theta/4) = ((1 - cos(theta/2))/2).sqrt
 
-      if (nroots == 1) dMinus1
-      else {
-        val c1 = Cyclotomic.halfCos(C.reOmega)
-        val s1 = Cyclotomic.halfSinOfCos(c1)
-        Real.two * dMinus1 * s1
-      }
+      val cos = C.reOmega
+      val halfCos = Cyclotomic.halfCos(cos)
+      val quartSin = Cyclotomic.halfSinOfCos(halfCos)
+      Real.two * realD.sqrt * quartSin
     }
 
     override def toString: String = {
-      s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, eps = $eps, eps1 = $eps1, ubEpsIsTrivial = $ubEpsIsTrivial, orthEpsIsTrivial = $orthEpsIsTrivial)"
+      s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, epsOrth = $epsOrth, epsUb = $epsUb, ubEpsIsTrivial = $ubEpsIsTrivial)"
     }
 
     // quantize a vector to the nearest root of unity
@@ -129,7 +129,7 @@ object VectorSpace {
       val exact = innerAbs2(v1, v2).sqrt
       val quant = innerAbs2(quantize(v1), quantize(v2)).sqrt
       val left = (exact - quant).abs
-      val right = eps
+      val right = epsOrth
 
       val gap = right - left
 
@@ -258,12 +258,6 @@ object VectorSpace {
       C.abs2(acc)
     }
 
-    // we know |a| <= d
-    // so if orthEps >= d this is trivial
-    // and everything is orthogonal
-    val orthEpsIsTrivial: Boolean =
-      (eps - realD).compare(0) >= 0
-
     /**
      * ||<u', v'>| - |<u, v>|| <= eps
      * but |<u, v>| = 0
@@ -280,7 +274,7 @@ object VectorSpace {
     // so if ubEps >= d + sqrt(d) this is trivial
     // and everything is unbiased
     val ubEpsIsTrivial: Boolean =
-      (eps - (realD + realD.sqrt)).compare(0) >= 0
+      (epsUb - (realD + realD.sqrt)).compare(0) >= 0
 
     /**
      * ||<u', v'>| - |<u, v>|| <= eps
@@ -295,12 +289,12 @@ object VectorSpace {
     def maybeOrth(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // acc <= 4d sin^2(pi / n)
-      isOrth(dotAbs2(v1, v2), eps)
+      isOrth(dotAbs2(v1, v2), epsOrth)
 
     def maybeUnbiased(v1: Array[Int], v2: Array[Int]): Boolean =
       // now, we want to see if
       // |acc - d| <= 4d sin^2(pi / n)
-      isUnbiased(dotAbs2(v1, v2), eps)
+      isUnbiased(dotAbs2(v1, v2), epsUb)
 
     // we own from and can mutate it
     @annotation.tailrec
@@ -614,19 +608,19 @@ object VectorSpace {
      */
     def allMubsFuture(orthSet: BitSet, ubBitSet: BitSet, cnt: Int)(implicit ec: ExecutionContext): Future[List[List[List[Int]]]] = {
 
-        def log[A](str: String, f: => Future[A]): Future[A] = {
+        def log[A](str: String, f: => Future[A])(msg: A => String): Future[A] = {
           val start = System.currentTimeMillis()
           println(s"#starting: $str")
           val fut = f
           fut.flatMap { a =>
             Future {
               val end = System.currentTimeMillis()
-              println(f"#done: $str (${(end - start)/1000.0}%.3f s)")
+              println(f"#done: $str => ${msg(a)} (${(end - start)/1000.0}%.3f s)")
               a
             }
           }
         }
-        val mubs = log("allMubVectorsFuture", allMubVectorsFuture(ubBitSet, cnt))
+        val mubs = log("allMubVectorsFuture", allMubVectorsFuture(ubBitSet, cnt))(_.iterator.map(_.summary).mkString("\n\t"))
         // we can pick any cnt bases, and any (cnt - 1) unbiased vectors
         // to transform them. We have to include the phantom 0 vector
         def assemble(bases: List[Cliques.Family[Int]], mubV: List[Cliques.Family[Int]]): Future[List[List[List[Int]]]] = {
@@ -634,16 +628,15 @@ object VectorSpace {
           require(mubV.forall(_.cliqueSize == (cnt - 1)), "invalid mub size")
 
           val mubsCount = new AtomicLong(0L)
-          val start = System.currentTimeMillis()
+          val start = System.nanoTime()
           val mubVLen = mubV.length
 
           def remaining(idx: Int, found: Long): Unit = {
-            if ((idx < 10) || (idx % (mubVLen / 100) == 1)) {
-              val end = System.currentTimeMillis()
+            if ((idx < 10) || ((mubVLen > 100) && idx % (mubVLen / 100) == 1)) {
+              val end = System.nanoTime()
               val idxD = idx.toDouble
-              val currentRateMs = (idxD + 1)/(end - start)
-              val remainingMs = (mubVLen - (idx + 1)) / currentRateMs
-              val remainingSec = remainingMs / 1000
+              val remainingNs = ((end - start).toDouble * (mubVLen - (idx + 1))) / (idxD + 1)
+              val remainingSec = remainingNs / (1000 * 1000 * 1000)
 
               println(f"#done: ${idxD/mubVLen}%2.2f, found: $found, ${remainingSec}%.1f sec remaining")
             }
@@ -692,7 +685,7 @@ object VectorSpace {
           .map(_.flatten)
         }
 
-        log("allBasesFuture", allBasesFuture(orthSet)).zip(mubs)
+        log("allBasesFuture", allBasesFuture(orthSet))(_.iterator.map(_.summary).mkString("\n\t")).zip(mubs)
           .flatMap {
             case (bases, mubV) =>
               println("#calling assemble")
@@ -832,23 +825,22 @@ object VectorSpace {
     f1.zip(f2).map(_ => ())
   }
 
-  sealed abstract class TableMode
+  sealed abstract class TableMode(val name: String)
   object TableMode {
-    case object Exact extends TableMode
-    case object Quant2 extends TableMode
-    case object Quant1 extends TableMode
+    case object Exact extends TableMode("exact")
+    case object Quant extends TableMode("quant")
 
-    def epsFor[N <: BinNat, C](tm: TableMode, s: Space[N, C]): Real =
+    def epsFor[N <: BinNat, C](isOrthTable: Boolean, tm: TableMode, s: Space[N, C]): Real =
       tm match {
         case Exact => Real.zero
-        case Quant2 => s.eps
-        case Quant1 => s.eps1
+        case Quant =>
+          if (isOrthTable) s.epsOrth
+          else s.epsUb
       }
 
     val opts: Opts[TableMode] =
       Opts.flag("exact", "don't weaken to approximate").as(Exact)
-        .orElse(Opts.flag("quant1", "quantize only one side").as(Quant1))
-        .orElse(Opts(Quant2))
+        .orElse(Opts(Quant))
   }
 
   def writeTable[N <: BinNat, C](
@@ -856,7 +848,7 @@ object VectorSpace {
     isOrthTable: Boolean,
     dos: DataOutputStream,
     mode: TableMode)(implicit ec: ExecutionContext): Future[Unit] = {
-    val eps = TableMode.epsFor(mode, space)
+    val eps = TableMode.epsFor(isOrthTable, mode, space)
     val fn =
       if (isOrthTable) space.isOrth(_, eps)
       else space.isUnbiased(_, eps)
@@ -983,24 +975,33 @@ object VectorSpace {
   val realBits: Opts[Int] = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)
 
   sealed abstract class Extend6 {
+    type N <: BinNat
+    type C
+    def space: Space[N, C]
     def readPath(isOrth: Boolean, path: Path): BitSet
     def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit]
   }
 
   object Extend6 {
     case class Dim12(space: Space[BinNat._12, Cyclotomic.L12]) extends Extend6 {
+      type N = BinNat._12
+      type C = Cyclotomic.L12
       def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
       def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
         extend6[BinNat._12, BinNat._3, BinNat._4, Cyclotomic.L12](space, orthSet, mubSet)
     }
 
     case class Dim24(space: Space[BinNat._24, Cyclotomic.L24]) extends Extend6 {
+      type N = BinNat._24
+      type C = Cyclotomic.L24
       def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
       def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
         extend6[BinNat._24, BinNat._6, BinNat._8, Cyclotomic.L24](space, orthSet, mubSet)
     }
 
     case class Dim36(space: Space[BinNat._36, Cyclotomic.L36]) extends Extend6 {
+      type N = BinNat._36
+      type C = Cyclotomic.L36
       def readPath(isOrth: Boolean, path: Path): BitSet = VectorSpace.readPath(space, isOrth, path)
       def run(orthSet: BitSet, mubSet: BitSet)(implicit ec: ExecutionContext): Future[Unit] =
         extend6[BinNat._36, BinNat._9, BinNat._12, Cyclotomic.L36](space, orthSet, mubSet)

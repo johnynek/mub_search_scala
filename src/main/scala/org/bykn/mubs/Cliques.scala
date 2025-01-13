@@ -29,6 +29,7 @@ object Cliques {
 
     def toDoc: Doc
 
+    def summary: String = s"Cliques.Family size = $cliqueSize, count = $cliqueCount"
     override def toString = toDoc.renderTrim(80)
   }
   object Family {
