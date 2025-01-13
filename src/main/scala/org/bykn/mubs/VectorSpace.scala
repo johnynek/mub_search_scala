@@ -535,6 +535,8 @@ object VectorSpace {
     // transform all but the first with a the corresponding mub
     // we add back the 0 vector to the front in the results
     private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family.NonEmpty[Int], ubBitSet: BitSet): LazyList[Mubs] = {
+      // at this point there are exactly cnt elements in each hs family, and cnt - 1 elements in mubs
+      // which will be extended to cnt with the 0 vector
 
       // TODO we are still using crossProduct
       // below which seems to be not leveraing the
@@ -630,7 +632,6 @@ object VectorSpace {
           val start = System.nanoTime()
           val mubVLen = mubV.length
 
-          val chooseBasis = Cliques.Family.chooseN(cnt, bases)
 
           def remaining(idx: Int, found: Long): Unit = {
             if ((idx < 10) || ((mubVLen > 100) && idx % (mubVLen / 100) == 1)) {
@@ -651,7 +652,7 @@ object VectorSpace {
                 // these are as cheap to compute as iterate so don't keep them
                 // in memory
                 val trans: Iterator[Mubs] =
-                  chooseBasis
+                  Cliques.Family.chooseN(cnt, bases)
                     .iterator
                     .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
                       transformStdBasis(hs, ubv, ubBitSet).iterator
@@ -659,7 +660,7 @@ object VectorSpace {
 
                 val res: List[List[List[Int]]] =
                   trans
-                    .flatMap(_.cliques)
+                    .flatMap(_.cliques.toLazyList)
                     .toList
 
                 val thisCount = res.length

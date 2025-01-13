@@ -135,7 +135,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       // zipWithIndex to make each item unique
       val xi = x.zipWithIndex
       val items = VectorSpace.chooseN(n, xi).toList
-      val fromCliques = Cliques.Family.chooseN(n, xi).flatMap(_.cliques)
+      val fromCliques = Cliques.Family.chooseN(n, xi).flatMap(_.cliques.toLazyList)
 
       assert(fromCliques == items)
     }
@@ -178,11 +178,11 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           val z = space2.zeroVec()
           val vv1 = space2.zeroVec()
 
-          val nonStandards = mubSet.cliques.flatMap(_.filter(_ >= space2.standardCount))
+          val nonStandards = mubSet.cliques.toLazyList.flatMap(_.filter(_ >= space2.standardCount))
           val allOrth0 = Cliques.allNodes[Int](nextFn(0), nextFn, { i => i >= (space2.standardCount - 1) }).toList
           assert(nonStandards == Nil, s"non-standards: $nonStandards, ${mubSet.cliques}, allOrth0 = $allOrth0")
 
-          mubSet.cliques.foreach { mub =>
+          mubSet.cliques.toLazyList.foreach { mub =>
             mub.foreach { v =>
               // all mubs are standard:
               space2.intToVector(v, vv1)
@@ -193,7 +193,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           }
 
           val vv2 = space2.zeroVec()
-          mubSet.cliques.foreach { mub =>
+          mubSet.cliques.toLazyList.foreach { mub =>
             VectorSpace.allDistinctPairs(mub)
               .foreach { case (v1, v2) =>
                 space2.intToVector(v1, vv1)

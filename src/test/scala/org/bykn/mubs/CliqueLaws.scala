@@ -84,7 +84,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     val nodes = Cliques.allNodes(0, next, last)
 
     val cliqres2 = timeit(s"sync $size $maxNodes") {
-      Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }).toList.flatMap(_.cliques.toList)
+      Cliques.sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) }).toList.flatMap(_.cliques.toLazyList.toList)
     }
 
     val cliq = timeit(s"findAllFuture $size $maxNodes") {
@@ -95,7 +95,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     val cliq3 = timeit(s"async $size $maxNodes") {
       val cliqres = Cliques.async(size, 0, next, last, () => { n1: Int => nfn(n1, _) })
       Await.result(cliqres, Inf)
-        .flatMap(_.cliques)
+        .flatMap(_.cliques.toLazyList)
     }
 
     cliq.forall(isClique(_)(nfn)) &&
@@ -114,7 +114,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       Cliques
         .sync[Int](size, 0, next, last, { n1: Int => nfn(n1, _) })
         .toList
-        .flatMap(_.cliques.toList)
+        .flatMap(_.cliques.toLazyList)
 
     val naive = naiveCliques(size, nodes, nfn).toList
 
@@ -184,16 +184,18 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     forAll(pair, mergeFn) { case ((cl0, cl1), fn) =>
       val cl01 = Cliques.Family.cliqueMerge(cl0, cl1)(fn)
 
+      val c0LL = cl0.cliques.toLazyList
+      val c1LL = cl1.cliques.toLazyList
       val naive: List[List[(Int, Int)]] =
         (for {
-          c0 <- cl0.cliques
-          c1 <- cl1.cliques
+          c0 <- c0LL
+          c1 <- c1LL
           zipped = c0.zip(c1)
           if (isCliqueLax(zipped)(fn))
         } yield zipped).toList.map(_.sorted).sorted
 
       val fancy: List[List[(Int, Int)]] =
-        cl01.to(LazyList).flatMap(_.cliques).toList
+        cl01.to(LazyList).flatMap(_.cliques.toLazyList.toList).toList
           .map(_.sorted).sorted
 
       assert(fancy == naive, s"$fancy\n\n!=\n\n$naive\n\n($cl01)")
@@ -212,14 +214,15 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
   def crossSimple[A](as: Cliques.Family[Cliques.Family[A]]): List[List[List[A]]] =
     as.cliques
-      .toList
+      .toLazyList
       .flatMap { listFam: List[Cliques.Family[A]] =>
         // make the full cross-product
         val expanded: List[List[List[A]]] =
-          listFam.map(_.cliques.toList)
+          listFam.map(_.cliques.toLazyList.toList)
 
         cross(expanded)
       }
+      .toList
 
   def sort3[A: Ordering](s: List[List[List[A]]]): List[List[List[A]]] =
     s.map(_.map(_.sorted).sorted).sorted
@@ -265,7 +268,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     forAll(genC1) { ff =>
       val ll0: List[List[List[Boolean]]] =
-        Cliques.Family.crossProduct(ff).flatMap(_.cliques).toList
+        Cliques.Family.crossProduct(ff).flatMap(_.cliques.toLazyList).toList
 
       val ll1: List[List[List[Boolean]]] =
         crossSimple(ff)

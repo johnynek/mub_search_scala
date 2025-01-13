@@ -1,7 +1,7 @@
 package org.bykn.mubs
 
 import cats.{Eval, Traverse}
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptyLazyList}
 import scala.reflect.ClassTag
 import scala.concurrent.{ExecutionContext, Future}
 import org.typelevel.paiges.Doc
@@ -15,7 +15,7 @@ object Cliques {
    */
   sealed abstract class Family[+A] {
     def headOption: Option[A]
-    def cliques: LazyList[List[A]]
+    def cliques: NonEmptyLazyList[List[A]]
     // how big are the cliques
     def cliqueSize: Int
     // how many cliques are in this family
@@ -45,7 +45,7 @@ object Cliques {
 
     final case object Empty extends Family[Nothing] {
       def headOption: Option[Nothing] = None
-      def cliques = LazyList(Nil)
+      val cliques = NonEmptyLazyList.fromLazyListPrepend(Nil, LazyList.empty)
       def cliqueSize: Int = 0
       def cliqueCount: Long = 1L
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
@@ -56,8 +56,8 @@ object Cliques {
     // 1. all items in tails have the same cliqueSize
     // 2. head < all heads in tails
     final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
-      def headOption: Option[A] = Some(head)
-      def cliques = tails.toList.to(LazyList).flatMap { tail => tail.cliques.map(head :: _) }
+      val headOption: Option[A] = Some(head)
+      def cliques = NonEmptyLazyList.fromNonEmptyList(tails).flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
       lazy val cliqueCount: Long =
         tails.foldLeft(0L)(_ + _.cliqueCount)
@@ -177,7 +177,7 @@ object Cliques {
         case NonEmpty(fa, rest) =>
           val restWork = rest.toList.to(LazyList).map(crossProduct(_))
           for {
-            first <- fa.cliques
+            first <- fa.cliques.toLazyList
             tails <- restWork
             // we know restWork.nonEmpty since it was from a result from crossProduct
             tailNEL = NonEmptyList.fromListUnsafe(tails.toList)
@@ -290,19 +290,18 @@ object Cliques {
       def all = allNodes(initNode, incNode, isLastNode).iterator
 
       def loop(size: Int): Future[List[Family[A]]] =
-        if (size <= 1) {
+        if (size <= 1) Future.successful {
           // there are no cliques with negative size
           // there is exactly 1 clique with 0 size
           // and each node can be in a clique of size 1
-          if (size < 0) Future.successful(Nil)
-          else if (size == 0) Future.successful(Family.Empty :: Nil)
+          if (size < 0) Nil
+          else if (size == 0) (Family.Empty :: Nil)
           else {
             val emptyChildren = NonEmptyList(Family.Empty, Nil)
-            Future.successful(all.map(Family.NonEmpty(_, emptyChildren)).toList)
+            all.map(Family.NonEmpty(_, emptyChildren)).toList
           }
         }
         else {
-          val ord = implicitly[Ordering[A]]
           loop(size - 1)
             .flatMap { smaller =>
               if (smaller.isEmpty) Future.successful(Nil)
@@ -313,6 +312,7 @@ object Cliques {
                     val nfn = buildNfn()
                     val neighborToN1 = nfn(n1)
 
+                    val ord = implicitly[Ordering[A]]
                     val n1Children =
                       smaller
                         .flatMap {
