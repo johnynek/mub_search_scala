@@ -550,6 +550,28 @@ object VectorSpace {
       // maybe we need some kind of crossMerge function
       import Cliques.Family
 
+      // the basis is a standard basis (missing the first all 0 vector)
+      // the int is a MUB vector to be applied to this basis
+      def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
+        // both bases are augmented with the 0 value
+        // we switch the phase because we put it on the left
+        val overall = conjProdInt(b1._2, b0._2)
+        val v1s = (0 :: b1._1)
+        (0 :: b0._1).forall { v0 =>
+          v1s.forall { v1 =>
+            ubBitSet.get(conjProdInt(overall, conjProdInt(v0, v1)))
+          }
+        }
+      }
+
+      def toFull(b0: Basis, mub: Int): Basis = {
+        // we have to do the conjugate twice
+        val conjMub = conjProdInt(mub, 0)
+        (0 :: b0).map { v =>
+          conjProdInt(conjMub, v)
+        }
+      }
+
       val mub0 = mubs.head
       val hs1Opt =
           // The entire first basis has to be unbiased to the first mub
@@ -566,32 +588,9 @@ object VectorSpace {
 
           val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
 
-          //
           Family
             .crossProduct(hs1)
             .flatMap { bases: Family[Basis] =>
-
-              // the basis is a standard basis (missing the first all 0 vector)
-              // the int is a MUB vector to be applied to this basis
-              def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
-                // both bases are augmented with the 0 value
-                // we switch the phase because we put it on the left
-                val overall = conjProdInt(b1._2, b0._2)
-                val v1s = (0 :: b1._1)
-                (0 :: b0._1).forall { v0 =>
-                  v1s.forall { v1 =>
-                    ubBitSet.get(conjProdInt(overall, conjProdInt(v0, v1)))
-                  }
-                }
-              }
-
-              def toFull(b0: Basis, mub: Int): Basis = {
-                // we have to do the conjugate twice
-                val conjMub = conjProdInt(mub, 0)
-                (0 :: b0).map { v =>
-                  conjProdInt(conjMub, v)
-                }
-              }
 
               Cliques.Family.cliqueMerge(bases, mubWithZero)(areUnbiased(_, _))
                 .map { mubF =>
@@ -631,6 +630,8 @@ object VectorSpace {
           val start = System.nanoTime()
           val mubVLen = mubV.length
 
+          val chooseBasis = Cliques.Family.chooseN(cnt, bases)
+
           def remaining(idx: Int, found: Long): Unit = {
             if ((idx < 10) || ((mubVLen > 100) && idx % (mubVLen / 100) == 1)) {
               val end = System.nanoTime()
@@ -650,8 +651,7 @@ object VectorSpace {
                 // these are as cheap to compute as iterate so don't keep them
                 // in memory
                 val trans: Iterator[Mubs] =
-                  Cliques.Family
-                    .chooseN(cnt, bases)
+                  chooseBasis
                     .iterator
                     .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
                       transformStdBasis(hs, ubv, ubBitSet).iterator

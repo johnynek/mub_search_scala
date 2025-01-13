@@ -13,6 +13,10 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
   implicit val cpuEC: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()))
 
+  override def scalaCheckTestParameters =
+    super.scalaCheckTestParameters
+      .withMinSuccessfulTests(1000)
+      .withMaxDiscardRatio(10)
 
   def genCliqueFamily[A](size: Int, ga: Gen[A], branch: Gen[Int]): Gen[Cliques.Family[A]] =
     if (size <= 0) Gen.const(Cliques.Family.Empty)
@@ -167,19 +171,20 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     }
 
   property("cliqueMerge matches a naive crossproduct + filter") {
+    val Size = 6
     val pair =
-      Gen.choose(0, 3)
+      Gen.choose(0, Size)
         .flatMap { size =>
-          val genC = genCliqueFamily(size, Gen.oneOf(true, false), Gen.choose(1, 4))
+          val genC = genCliqueFamily(size, Gen.oneOf(0 to Size), Gen.choose(1, Size))
           Gen.zip(genC, genC)
         }
 
-    val mergeFn = arbitrary[((Boolean, Boolean), (Boolean, Boolean)) => Boolean]
+    val mergeFn = arbitrary[((Int, Int), (Int, Int)) => Boolean]
 
     forAll(pair, mergeFn) { case ((cl0, cl1), fn) =>
       val cl01 = Cliques.Family.cliqueMerge(cl0, cl1)(fn)
 
-      val naive: List[List[(Boolean, Boolean)]] =
+      val naive: List[List[(Int, Int)]] =
         (for {
           c0 <- cl0.cliques
           c1 <- cl1.cliques
@@ -187,7 +192,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
           if (isCliqueLax(zipped)(fn))
         } yield zipped).toList.map(_.sorted).sorted
 
-      val fancy: List[List[(Boolean, Boolean)]] =
+      val fancy: List[List[(Int, Int)]] =
         cl01.to(LazyList).flatMap(_.cliques).toList
           .map(_.sorted).sorted
 
