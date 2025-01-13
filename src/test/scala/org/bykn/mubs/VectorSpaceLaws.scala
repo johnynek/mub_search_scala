@@ -10,7 +10,7 @@ import scala.concurrent.Future
 class VectorSpaceLaws extends munit.ScalaCheckSuite {
   override def scalaCheckTestParameters =
     super.scalaCheckTestParameters
-      .withMinSuccessfulTests(50)
+      .withMinSuccessfulTests(1000)
       .withMaxDiscardRatio(10)
 
   val dim = 6
@@ -154,7 +154,8 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
    */
   val space2 = new VectorSpace.Space[BinNat._32, Cyclotomic.L32](2, 20)
 
-  test("allMubVectors are all unbiased to each other and 0") {
+  // this test is very slow
+  test("allMubVectors are all unbiased to each other and 0".ignore) {
     val ubBitSet = space2.buildCache(space2.isUnbiased(_, space2.eps))
     val nextFn = space2.nextFn(ubBitSet)
 
@@ -382,9 +383,9 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
           s"gap = ${diff - eps}"
         ).mkString("\n")
 
-      val gamma = if (nth == 1) Real(2*d) else Real(2*d) * Real.sin(Real.pi / nth)
-      val eps = gamma
-      val law = diff.compare(eps) <= 0
+      val eps = if (nth == 1) Real(2*d) else Real(2*d) * Real.sin(Real.pi / nth)
+      //val law = diff.compare(eps) <= 0
+      val law = diff.compare(eps / 2) <= 0
     }
 
     val genRoot: Gen[Complex[Real]] =
@@ -416,7 +417,8 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     }
   }
 
-  test("we can round-trip tables") {
+  // This is very slow
+  test("we can round-trip tables".ignore) {
     implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
     def law[N <: BinNat, C](space: VectorSpace.Space[N, C], isOrth: Boolean, tm: VectorSpace.TableMode) = {

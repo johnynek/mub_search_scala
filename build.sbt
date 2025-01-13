@@ -1,6 +1,6 @@
 import Dependencies._
 
-ThisBuild / scalaVersion     := "2.13.3"
+ThisBuild / scalaVersion     := "2.13.15"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
 ThisBuild / organization     := "com.example"
 ThisBuild / organizationName := "example"
@@ -19,7 +19,7 @@ lazy val root = (project in file("."))
       "org.scalacheck" %% "scalacheck" % "1.14.3" % Test,
     ),
     testFrameworks += new TestFramework("munit.Framework"),
-    test in assembly := {}
+    assembly / test := {}
   )
 
 // Uncomment the following for publishing to Sonatype.
