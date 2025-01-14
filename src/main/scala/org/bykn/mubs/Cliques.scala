@@ -158,7 +158,8 @@ object Cliques {
           }
         }
 
-      if (n < 0 || items.isEmpty) LazyList.empty
+      if (n == 0) LazyList(Empty)
+      else if (n < 0 || items.isEmpty) LazyList.empty
       else loop(n)
     }
 
@@ -228,6 +229,30 @@ object Cliques {
 
         loop(Nil, fa, fb)
       }
+
+      // Lazily combine two families if the cliques are the same size
+      def product[A, B](fa: Family[A], fb: Family[B]): Option[Family[(A, B)]] =
+        if (fa.cliqueSize == fb.cliqueSize) {
+          def loop(fa: Family[A], fb: Family[B]): Family[(A, B)] =
+            (fa, fb) match {
+              case (Empty, Empty) => Empty
+              case (NonEmpty(a, as), NonEmpty(b, bs)) =>
+                val children =
+                  for {
+                    aa <- as
+                    bb <- bs
+                  } yield loop(aa, bb)
+
+                NonEmpty((a, b), children)
+
+              case notAligned =>
+                // these are misaligned
+                sys.error(s"invariant violation: $notAligned")
+            }
+
+          Some(loop(fa, fb))
+        }
+        else None
 
     /**
      * See the law in the tests, but this:

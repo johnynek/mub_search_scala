@@ -124,7 +124,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     forAll(Gen.choose(0, 4), Gen.choose(0, 10).flatMap(Gen.listOfN(_, Gen.const(())))) { (n, x) =>
       // zipWithIndex to make each item unique
       val items = VectorSpace.chooseN(n, x.zipWithIndex).toList
-      assert(items.length == math.pow(x.length, n).toInt)
+      assertEquals(items.length, math.pow(x.length, n).toInt)
       assert(items.forall(_.length == n))
       assert(items.distinct == items)
     }
@@ -137,7 +137,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       val items = VectorSpace.chooseN(n, xi).toList
       val fromCliques = Cliques.Family.chooseN(n, xi).flatMap(_.cliques.toLazyList)
 
-      assert(fromCliques == items)
+      assertEquals(fromCliques.toList, items)
     }
   }
 

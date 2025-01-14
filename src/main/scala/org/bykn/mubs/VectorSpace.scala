@@ -774,8 +774,7 @@ object VectorSpace {
         }
       }
 
-    if (items.isEmpty) Iterator.empty
-    else loop(n)
+    loop(n)
   }
 
   // choose without replacement
