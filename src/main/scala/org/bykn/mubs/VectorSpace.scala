@@ -538,18 +538,6 @@ object VectorSpace {
       // at this point there are exactly cnt elements in each hs family, and cnt - 1 elements in mubs
       // which will be extended to cnt with the 0 vector
 
-      // TODO we are still using expand
-      // below which seems to be not leveraging the
-      // fact that we can remove subtrees of bases that
-      // are not fully unbiased to the mubs faster
-      // e.g. any head basis that isn't unbiased
-      // to all the mubs definitely won't work
-      // so, we could filter first
-      // or, if we can use cliqueMerge directly on hs and mubs
-      // somehow we will save a massive amount of work
-      // but we may need to generalize since hs
-      // involves the cross-product somehow
-      // maybe we need some kind of crossMerge function
       import Cliques.Family
 
       // the basis is a standard basis (missing the first all 0 vector)
@@ -566,6 +554,17 @@ object VectorSpace {
         }
       }
 
+      def hasUnbiased(b0: (BasisF, Int), b1: (BasisF, Int)): Boolean = {
+        val (h0, v0) = b0
+        val (h1, v1) = b1
+        h0.cliques.exists { m0 =>
+          val x0 = (m0, v0)
+          h1.cliques.exists { m1 =>
+            areUnbiased(x0, (m1, v1))
+          }
+        }
+      }
+
       def toFull(b0: Basis, mub: Int): Basis = {
         // we have to do the conjugate twice
         val conjMub = conjProdInt(mub, 0)
@@ -574,6 +573,68 @@ object VectorSpace {
         }
       }
 
+      def keepGood(list: List[(Family[Int], Int)]): LazyList[Family[List[Int]]] = {
+        val toFulls: List[Family[Int]] = list.map { case (fam, phase) =>
+          val conjPhase = conjProdInt(phase, 0)
+          fam.prefix(0).map { i =>
+            conjProdInt(conjPhase, i)
+          }
+        }
+        
+        // take one from each item in the family
+        def loop(lst: List[Family[Int]]): LazyList[Family[List[Int]]] =
+          lst match {
+            case Nil => LazyList.empty
+            case h1 :: Nil => LazyList(h1.map(_ :: Nil))
+            case f1 :: tail =>
+              loop(tail).flatMap { tailFam =>
+                // now   
+                val headBases: LazyList[List[Int]] = f1.cliques.toLazyList
+                headBases.flatMap { basis =>
+                  // Need to be orthogonal to everything in the tail
+                  tailFam.filter(tailBases =>
+                    tailBases.forall { v1 =>
+                      basis.forall { v0 =>
+                        ubBitSet.get(conjProdInt(v0, v1))
+                      }  
+                    }  
+                  )
+                  .map(_.prefix(basis))
+                }
+              }
+          }
+
+        loop(toFulls)
+      }
+
+      val mubWithZero = mubs.prefix(0)
+      Cliques.Family.cliqueMerge(hs, mubWithZero)(hasUnbiased(_, _)) match {
+        case None => LazyList.empty
+        case Some(fam) =>
+          val hasAtLeastOne: Family[(BasisF, Int)] = fam
+          // now filter
+
+          hasAtLeastOne
+            .cliques
+            .toLazyList
+            .flatMap { (bi: List[(BasisF, Int)]) =>
+              keepGood(bi)
+            }
+      }
+      /*
+
+      // TODO we are still using expand
+      // below which seems to be not leveraging the
+      // fact that we can remove subtrees of bases that
+      // are not fully unbiased to the mubs faster
+      // e.g. any head basis that isn't unbiased
+      // to all the mubs definitely won't work
+      // so, we could filter first
+      // or, if we can use cliqueMerge directly on hs and mubs
+      // somehow we will save a massive amount of work
+      // but we may need to generalize since hs
+      // involves the cross-product somehow
+      // maybe we need some kind of crossMerge function
       val mub0 = mubs.head
       val hs1Opt =
           // The entire first basis has to be unbiased to the first mub
@@ -588,7 +649,6 @@ object VectorSpace {
         case None => LazyList.empty
         case Some(hs1) =>
 
-          val mubWithZero = mubs.prefix(0)
 
           Family
             .expand(hs1)
@@ -600,6 +660,7 @@ object VectorSpace {
                 }
             }
       }
+      */
     }
 
     /**

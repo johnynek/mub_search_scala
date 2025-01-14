@@ -140,7 +140,7 @@ object Cliques {
         }
 
       // this is like a clique from two cliques
-      def cliqueMerge[A, B, C](fa: Family[A], fb: Family[B])(fn: ((A, B), (A, B)) => Boolean): Option[Family[(A, B)]] = {
+      def cliqueMerge[A, B](fa: Family[A], fb: Family[B])(fn: ((A, B), (A, B)) => Boolean): Option[Family[(A, B)]] = {
 
         def loop(outer: List[(A, B)], fa: Family[A], fb: Family[B]): Option[Family[(A, B)]] =
           (fa, fb) match {
