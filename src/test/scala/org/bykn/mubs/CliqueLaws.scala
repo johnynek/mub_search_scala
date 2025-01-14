@@ -1,6 +1,6 @@
 package org.bykn.mubs
 
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptyLazyList}
 import java.util.concurrent.Executors
 import org.scalacheck.Prop.forAll
 import org.scalacheck.Arbitrary.arbitrary
@@ -29,7 +29,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
         childList0 <- Gen.listOfN(children max 1, recur)
         // make sure we generate legit cliques so that we don't repeat head branches in children
         childList = childList0.groupBy(_.headOption).iterator.map { case (_, vs) => (vs.head) }.toList
-      } yield Cliques.Family.NonEmpty(head, NonEmptyList.fromListUnsafe(childList))
+      } yield Cliques.Family.NonEmpty(head, NonEmptyLazyList.fromLazyListUnsafe(childList.to(LazyList)))
     }
 
   // make all possible combinations of size, then filter such that they are all neighbors

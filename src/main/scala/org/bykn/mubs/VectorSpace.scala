@@ -539,7 +539,7 @@ object VectorSpace {
       // which will be extended to cnt with the 0 vector
 
       // TODO we are still using expand
-      // below which seems to be not leveraing the
+      // below which seems to be not leveraging the
       // fact that we can remove subtrees of bases that
       // are not fully unbiased to the mubs faster
       // e.g. any head basis that isn't unbiased
@@ -588,7 +588,7 @@ object VectorSpace {
         case None => LazyList.empty
         case Some(hs1) =>
 
-          val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
+          val mubWithZero = mubs.prefix(0)
 
           Family
             .expand(hs1)
@@ -676,7 +676,7 @@ object VectorSpace {
               Future {
                 val res: List[List[List[Int]]] =
                   bases.flatMap { fam =>
-                    val withZero = Cliques.Family.NonEmpty(0, NonEmptyList(fam, Nil))
+                    val withZero = fam.prefix(0)
                     withZero.cliques.map(_ :: Nil).toList
                   }
 
@@ -713,7 +713,8 @@ object VectorSpace {
         }
       }
 
-    loop(n)
+    if (items.isEmpty) Iterator.empty
+    else loop(n)
   }
 
   // choose without replacement

@@ -30,6 +30,9 @@ object Cliques {
 
     def summary: String = s"Cliques.Family size = $cliqueSize, count = $cliqueCount"
     override def toString = toDoc.renderTrim(80)
+
+    def prefix[A1 >: A](a1: A1): Family[A1] =
+      Family.NonEmpty(a1, NonEmptyLazyList.fromLazyListPrepend(this, LazyList.empty))
   }
   object Family {
     implicit class InvariantMethods[A](private val self: Family[A]) extends AnyVal {
@@ -54,16 +57,16 @@ object Cliques {
     // invariants:
     // 1. all items in tails have the same cliqueSize
     // 2. head < all heads in tails
-    final case class NonEmpty[A](head: A, tails: NonEmptyList[Family[A]]) extends Family[A] {
+    final case class NonEmpty[A](head: A, tails: NonEmptyLazyList[Family[A]]) extends Family[A] {
       val headOption: Option[A] = Some(head)
-      def cliques = NonEmptyLazyList.fromNonEmptyList(tails).flatMap { tail => tail.cliques.map(head :: _) }
+      def cliques = tails.flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
       lazy val cliqueCount: Long =
         tails.foldLeft(0L)(_ + _.cliqueCount)
 
       def filter(fn: A => Boolean): Option[Family[A]] =
         if (fn(head)) {
-          NonEmptyList.fromList(tails.toList.flatMap(_.filter(fn)))
+          NonEmptyLazyList.fromLazyList(tails.toLazyList.flatMap(_.filter(fn)))
             .map(NonEmpty(head, _))
         }
         else None
@@ -82,19 +85,25 @@ object Cliques {
       }
     }
 
-    def chooseN[A](n: Int, items: List[A]): LazyList[Family[A]] =
-      if (n < 0) LazyList.empty
-      else if (n == 0) LazyList(Empty)
-      else if (items.isEmpty) LazyList.empty // can't take more than 0 from an empty list
-      else {
-        NonEmptyList.fromList(chooseN(n - 1, items).toList) match {
-          case None => LazyList.empty
-          case Some(rest) =>
-            // compute the tail once and share
-            // the reference with all items
-            items.to(LazyList).map { a => NonEmpty(a, rest) }
+    // This is choosing with replacement
+    def chooseN[A](n: Int, items: List[A]): LazyList[Family[A]] = {
+      val itemsLL = items.to(LazyList)
+
+      def loop(n: Int): LazyList[Family[A]] =
+        if (n == 0) LazyList(Empty)
+        else {
+          NonEmptyLazyList.fromLazyList(loop(n - 1)) match {
+            case None => LazyList.empty
+            case Some(rest) =>
+              // compute the tail once and share
+              // the reference with all items
+              itemsLL.map { a => NonEmpty(a, rest) }
+          }
         }
-      }
+
+      if (n < 0 || items.isEmpty) LazyList.empty
+      else loop(n)
+    }
 
     implicit val traverseForFamily: Traverse[Family] =
       new Traverse[Family] {
@@ -146,12 +155,12 @@ object Cliques {
                 val outer1 = headAB :: outer
                 val children =
                   for {
-                    aa <- as.toList
-                    bb <- bs.toList
+                    aa <- as.toLazyList
+                    bb <- bs.toLazyList
                     ab <- loop(outer1, aa, bb).toList
                   } yield ab
 
-                NonEmptyList.fromList(children)
+                NonEmptyLazyList.fromLazyList(children)
                   .map(NonEmpty(headAB, _))
               }
 
@@ -182,12 +191,12 @@ object Cliques {
           else {
             // use the if to avoid recursing when faCliques is empty
             // make this lazy so we only evaluate it when faCliques is nonEmpty
-            val restWork = rest.toList.to(LazyList).map(expandWith(_)(cliquesOf))
+            val restWork = rest.map(expandWith(_)(cliquesOf))
             for {
               first <- faCliques
-              tails <- restWork
+              tails <- restWork.toLazyList
               if (tails.nonEmpty)
-            } yield NonEmpty(first, NonEmptyList.fromListUnsafe(tails.toList))
+            } yield NonEmpty(first, NonEmptyLazyList.fromLazyListUnsafe(tails))
         }
       }
   }
@@ -296,6 +305,8 @@ object Cliques {
     buildNfn: () => A => A => Boolean)(implicit ec: ExecutionContext): Future[List[Family[A]]] = {
       def all = allNodes(initNode, incNode, isLastNode).iterator
 
+      val emptyChildren = NonEmptyLazyList.fromLazyListPrepend(Family.Empty, LazyList.empty)
+
       def loop(size: Int): Future[List[Family[A]]] =
         if (size <= 1) Future.successful {
           // there are no cliques with negative size
@@ -304,7 +315,6 @@ object Cliques {
           if (size < 0) Nil
           else if (size == 0) (Family.Empty :: Nil)
           else {
-            val emptyChildren = NonEmptyList(Family.Empty, Nil)
             all.map(Family.NonEmpty(_, emptyChildren)).toList
           }
         }
@@ -322,6 +332,7 @@ object Cliques {
                     val ord = implicitly[Ordering[A]]
                     val n1Children =
                       smaller
+                        .to(LazyList)
                         .flatMap {
                           case f@Family.NonEmpty(h, rest) if ord.lt(n1, h) && neighborToN1(h) =>
                             f.filter(neighborToN1)
@@ -329,7 +340,7 @@ object Cliques {
                             None
                         }
 
-                    NonEmptyList.fromList(n1Children)
+                    NonEmptyLazyList.fromLazyList(n1Children)
                       .map(Family.NonEmpty(n1, _))
                   }
                 } { _.flatten }
@@ -352,12 +363,13 @@ object Cliques {
     isLastNode: A => Boolean,
     nfn: A => A => Boolean): LazyList[Family[A]] = {
       def all = allNodes(initNode, incNode, isLastNode)
+      val empty = NonEmptyLazyList.fromLazyListPrepend(Family.Empty, LazyList.empty)
+
       def loop(size: Int): LazyList[Family[A]] =
         if (size <= 1) {
           if (size < 0) LazyList.empty
           else if (size == 0) LazyList(Family.Empty)
           else {
-            val empty = NonEmptyList(Family.Empty, Nil)
             all.map { n => Family.NonEmpty(n, empty) }
           }
         }
@@ -378,7 +390,7 @@ object Cliques {
                       None
                   }
 
-              NonEmptyList.fromList(n1Children.toList)
+              NonEmptyLazyList.fromLazyList(n1Children)
                 .map(Family.NonEmpty(n1, _))
             }
           }
