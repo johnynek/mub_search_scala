@@ -10,6 +10,8 @@ import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 import java.util.random.RandomGenerator.ArbitrarilyJumpableGenerator
 
+import cats.syntax.all._
+
 class CliqueLaws extends munit.ScalaCheckSuite {
 
   implicit val cpuEC: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()))
@@ -44,6 +46,15 @@ class CliqueLaws extends munit.ScalaCheckSuite {
     Cogen { (seed, nel) =>
       nel.foldLeft(seed)(Cogen[A].perturb(_, _))  
     }
+
+  def genNelSize[A](sz: Int, genA: Gen[A]): Gen[NonEmptyList[A]] =
+    Gen.zip(genA, Gen.listOfN(sz, genA)).map { case (h, t) => NonEmptyList(h, t) }
+
+  def genNel[A](genA: Gen[A]): Gen[NonEmptyList[A]] =
+    Gen.sized(genNelSize(_, genA))
+
+  implicit def arbNel[A: Arbitrary]: Arbitrary[NonEmptyList[A]] =
+    Arbitrary(genNel(arbitrary[A]))
 
   // make all possible combinations of size, then filter such that they are all neighbors
   @annotation.tailrec
@@ -325,6 +336,33 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       .toList
 
       assertEquals(Cliques.Family.fromList(items), cl1.map(NonEmptyList.one(_)))
+    }
+  }
+
+  property("mapExpand homomorphism") {
+    // can't have giant branching here
+    implicit val arbNEL =
+      Arbitrary(Gen.choose(0, 2).flatMap(genNelSize(_, arbitrary[Int])))
+
+    implicit val arbFam =
+      Arbitrary(
+        genCliqueFamily(3, arbitrary[Int], Gen.choose(0, 2))
+      )
+
+    forAll { (cl: Cliques.Family[Int], fn: Int => NonEmptyList[Int]) =>
+      val fn1 = fn.andThen(NonEmptyLazyList.fromNonEmptyList(_))
+      val cl1 = cl.mapExpand(fn1)
+      val items = cl.cliques.flatMap { clique =>
+        clique.traverse(fn1)
+      }
+      .toLazyList
+      .toList
+
+      val itemSet = items.toSet
+
+      // They can be in different orders but they have the same elements
+      assert(items.forall { item => cl1.exists(_.contains(item))})
+      assert(cl1.flatMap(_.cliques).forall(itemSet(_)))
     }
   }
 }

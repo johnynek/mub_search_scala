@@ -12,8 +12,9 @@ import scala.collection.immutable
 
 object Cliques {
   /**
-   * Represents a test of cliques all of which
-   * begin with the same item
+   * Represents a set of cliques all of which
+   * begin with the same item or are empty
+   * All of them have the same size
    */
   sealed abstract class Family[+A] {
     def headOption: Option[A]
@@ -31,6 +32,7 @@ object Cliques {
     def filterRevPrefixes(fn: NonEmptyList[A] => Boolean): Option[Family[A]]
 
     def map[B](fn: A => B): Family[B]
+    def mapExpand[B](fn: A => NonEmptyLazyList[B]): NonEmptyLazyList[Family[B]]
 
     def toDoc: Doc
 
@@ -49,6 +51,16 @@ object Cliques {
             fn(a).map(NonEmpty(_, rest))
         }
 
+      def contains(lst: List[A])(implicit A: cats.Eq[A]): Boolean =
+        self match {
+          case Empty => lst.isEmpty
+          case NonEmpty(a, rest) =>
+            lst match {
+              case h :: t =>
+                A.eqv(h, a) && rest.exists(_.contains(t))
+              case Nil => false
+            }
+        }
     }
 
     final case object Empty extends Family[Nothing] {
@@ -59,12 +71,13 @@ object Cliques {
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
       def filterRevPrefixes(fn: NonEmptyList[Nothing] => Boolean) = Some(Empty)
       def map[B](fn: Nothing => B): Family[B] = this
+      def mapExpand[B](fn: Nothing => NonEmptyLazyList[B]): NonEmptyLazyList[Family[B]] = NonEmptyLazyList(this)
       def toDoc = Doc.text("{}")
     }
     // invariant:
     // all items in tails have the same cliqueSize
     final case class NonEmpty[A](head: A, tails: NonEmptyLazyList[Family[A]]) extends Family[A] {
-      val headOption: Option[A] = Some(head)
+      def headOption: Option[A] = Some(head)
       def cliques = tails.flatMap { tail => tail.cliques.map(head :: _) }
       def cliqueSize: Int = tails.head.cliqueSize + 1
       lazy val cliqueCount: Long =
@@ -94,6 +107,15 @@ object Cliques {
       def map[B](fn: A => B): Family[B] =
         NonEmpty(fn(head), tails.map(_.map(fn)))
 
+      def mapExpand[B](fn: A => NonEmptyLazyList[B]): NonEmptyLazyList[Family[B]] =
+        fn(head)
+          .flatMap { headB =>
+            // we could cache lazyTraverse(tails)(_.mapExpand(fn)), but that would materialize into memory
+            // maybe more than we want
+            lazyTraverse(tails)(_.mapExpand(fn))
+              .map(NonEmpty(headB, _))
+          }
+
       def toDoc = {
         val tdoc = tails.toList.map(_.toDoc)
 
@@ -104,6 +126,16 @@ object Cliques {
           Doc.char('}')
       }
     }
+
+    def lazyTraverse[A, B](nel: NonEmptyLazyList[A])(fn: A => NonEmptyLazyList[B]): NonEmptyLazyList[NonEmptyLazyList[B]] =
+      fn(nel.head)
+        .flatMap { h =>
+          NonEmptyLazyList.fromLazyList(nel.tail) match {
+            case None => NonEmptyLazyList(NonEmptyLazyList(h))
+            case Some(nelTail) => lazyTraverse(nelTail)(fn).map(h +: _)
+          }
+        }
+        
 
     // if the inner lists are all the same size, return this as a family
     def fromList[A: Order](lst: List[List[A]]): Option[NonEmptyList[Family[A]]] =
