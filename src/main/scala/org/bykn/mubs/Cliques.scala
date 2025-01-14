@@ -26,7 +26,6 @@ object Cliques {
 
     def map[B](fn: A => B): Family[B]
 
-
     def toDoc: Doc
 
     def summary: String = s"Cliques.Family size = $cliqueSize, count = $cliqueCount"
@@ -166,22 +165,30 @@ object Cliques {
 
     /**
      * See the law in the tests, but this:
-     * crossProduct(ff).flatMap(_.cliques).toList
+     * expand(ff).flatMap(_.cliques).toList
      *
      * should create the same set as fully expanding
      * the families
      */
-    def crossProduct[A](f2: Family[Family[A]]): LazyList[Family[List[A]]] =
+    def expand[A](f2: Family[Family[A]]): LazyList[Family[List[A]]] =
+      expandWith(f2)(_.cliques.toLazyList)
+
+    def expandWith[A, B](f2: Family[A])(cliquesOf: A => LazyList[B]): LazyList[Family[B]] =
       f2 match {
         case Empty => LazyList(Empty)
         case NonEmpty(fa, rest) =>
-          val restWork = rest.toList.to(LazyList).map(crossProduct(_))
-          for {
-            first <- fa.cliques.toLazyList
-            tails <- restWork
-            // we know restWork.nonEmpty since it was from a result from crossProduct
-            tailNEL = NonEmptyList.fromListUnsafe(tails.toList)
-          } yield NonEmpty(first, tailNEL)
+          val faCliques = cliquesOf(fa)
+          if (faCliques.isEmpty) LazyList.empty
+          else {
+            // use the if to avoid recursing when faCliques is empty
+            // make this lazy so we only evaluate it when faCliques is nonEmpty
+            val restWork = rest.toList.to(LazyList).map(expandWith(_)(cliquesOf))
+            for {
+              first <- faCliques
+              tails <- restWork
+              if (tails.nonEmpty)
+            } yield NonEmpty(first, NonEmptyList.fromListUnsafe(tails.toList))
+        }
       }
   }
 

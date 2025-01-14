@@ -538,7 +538,7 @@ object VectorSpace {
       // at this point there are exactly cnt elements in each hs family, and cnt - 1 elements in mubs
       // which will be extended to cnt with the 0 vector
 
-      // TODO we are still using crossProduct
+      // TODO we are still using expand
       // below which seems to be not leveraing the
       // fact that we can remove subtrees of bases that
       // are not fully unbiased to the mubs faster
@@ -591,7 +591,7 @@ object VectorSpace {
           val mubWithZero = Family.NonEmpty(0, NonEmptyList(mubs, Nil))
 
           Family
-            .crossProduct(hs1)
+            .expand(hs1)
             .flatMap { bases: Family[Basis] =>
 
               Cliques.Family.cliqueMerge(bases, mubWithZero)(areUnbiased(_, _))

@@ -258,7 +258,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       List(List(false, false), List(false, false)))))
   }
 
-  property("crossProduct is lawful") {
+  property("expand is lawful") {
     val genC1 =
       Gen.zip(Gen.choose(0, 3), Gen.choose(0, 3))
         .flatMap { case (s1, s2) =>
@@ -268,7 +268,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     forAll(genC1) { ff =>
       val ll0: List[List[List[Boolean]]] =
-        Cliques.Family.crossProduct(ff).flatMap(_.cliques.toLazyList).toList
+        Cliques.Family.expand(ff).flatMap(_.cliques.toLazyList).toList
 
       val ll1: List[List[List[Boolean]]] =
         crossSimple(ff)
