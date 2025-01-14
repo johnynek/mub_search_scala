@@ -140,18 +140,21 @@ object SearchApp extends CommandApp(
     val info =
       (spaceOpt,
         threads,
-        (Opts.flag("bases", "compute all the standard bases and give the size") *> orthTab).orNone,
+        tableOpts,
+        Opts.flag("bases", "compute all the standard bases and give the size").orFalse,
         Opts.flag("sync", "run synchronous (less memory, but no concurrency)").orFalse,
-        (goalMubs.product(ubTab)).orNone,
+        goalMubs.orNone,
         limitOpt
         )
-        .mapN { (space, cont, bases0, runSync, mubsOpt0, limit) =>
+        .mapN { (space, cont, pathFn, bases0, runSync, mubsOpt0, limit) =>
           cont { implicit ec =>
-            val bases = bases0.map { path =>
-              VectorSpace.readPath(space, true, path)
-            }
-            val mubsOpt = mubsOpt0.map { case (n, path) =>
-              (n, VectorSpace.readPath(space, false, path))
+            val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
+            val bases = if (bases0) Some {
+              VectorSpace.readPath(space, true, orthPath)
+            } else None
+
+            val mubsOpt = mubsOpt0.map { n =>
+              (n, VectorSpace.readPath(space, false, ubPath))
             }
             Await.result(VectorSpace.runInfo(space, bases, runSync, mubsOpt, limit), Inf)
           }

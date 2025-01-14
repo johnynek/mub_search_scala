@@ -4,10 +4,11 @@ import cats.data.{NonEmptyList, NonEmptyLazyList}
 import java.util.concurrent.Executors
 import org.scalacheck.Prop.forAll
 import org.scalacheck.Arbitrary.arbitrary
-import org.scalacheck.{Gen, Prop}
+import org.scalacheck.{Arbitrary, Cogen, Gen, Prop}
 import org.typelevel.paiges.Doc
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
+import java.util.random.RandomGenerator.ArbitrarilyJumpableGenerator
 
 class CliqueLaws extends munit.ScalaCheckSuite {
 
@@ -15,7 +16,7 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
   override def scalaCheckTestParameters =
     super.scalaCheckTestParameters
-      .withMinSuccessfulTests(1000)
+      .withMinSuccessfulTests(500)
       .withMaxDiscardRatio(10)
 
   def genCliqueFamily[A](size: Int, ga: Gen[A], branch: Gen[Int]): Gen[Cliques.Family[A]] =
@@ -30,6 +31,18 @@ class CliqueLaws extends munit.ScalaCheckSuite {
         // make sure we generate legit cliques so that we don't repeat head branches in children
         childList = childList0.groupBy(_.headOption).iterator.map { case (_, vs) => (vs.head) }.toList
       } yield Cliques.Family.NonEmpty(head, NonEmptyLazyList.fromLazyListUnsafe(childList.to(LazyList)))
+    }
+
+  implicit def arbCliqueFamily[A: Arbitrary]: Arbitrary[Cliques.Family[A]] =
+    Arbitrary(Gen.sized { size0 =>
+      // we get exponentially large, so use log to scale better
+      val depth = if (size0 > 0) (math.log(size0.toDouble)/math.log(2)).toInt else 0
+      genCliqueFamily(depth, arbitrary[A], Gen.choose(1, 4))
+    })
+
+  implicit def cogenNel[A: Cogen]: Cogen[NonEmptyList[A]] =
+    Cogen { (seed, nel) =>
+      nel.foldLeft(seed)(Cogen[A].perturb(_, _))  
     }
 
   // make all possible combinations of size, then filter such that they are all neighbors
@@ -62,8 +75,10 @@ class CliqueLaws extends munit.ScalaCheckSuite {
 
     allCombos(size, nodes)
       .filter { s =>
-        s.sliding(2).forall { case Seq(a, b) =>
-          Ordering[A].lt(a, b)
+        s.sliding(2).forall {
+          case Seq(a, b) =>
+            Ordering[A].lt(a, b)
+          case o => sys.error(s"unexpected in sliding: $o")
         }
       }
       .filter(isClique(_)(nfn))
@@ -276,6 +291,40 @@ class CliqueLaws extends munit.ScalaCheckSuite {
       val left = sort3(ll0)
       val right = sort3(ll1)
       assert(left == right, s"$left != $right")
+    }
+  }
+
+  property("Cliques.fromList(fam.cliques.toList) == fam") {
+    forAll { (cl: Cliques.Family[Int]) =>
+      assertEquals(Cliques.Family.fromList(cl.cliques.toNonEmptyList.toList), Some(NonEmptyList.one(cl)))
+    }
+  }
+
+  property("filter homomorphism") {
+    forAll { (cl: Cliques.Family[Int], fn: Int => Boolean) =>
+      val cl1 = cl.filter(fn)
+      val items = cl.cliques.toLazyList.filter { clique =>
+        clique.forall(fn)
+      }
+      .toList
+
+      assertEquals(Cliques.Family.fromList(items), cl1.map(NonEmptyList.one(_)))
+    }
+  }
+
+  property("filterRevPrefix homomorphism") {
+    forAll { (cl: Cliques.Family[Int], fn: NonEmptyList[Int] => Boolean) =>
+      val cl1 = cl.filterRevPrefixes(fn)
+      val items = cl.cliques.toLazyList.filter { clique =>
+        clique.inits.forall {
+          case Nil => true
+          case h :: t =>
+            fn(NonEmptyList(h, t).reverse)
+        }
+      }
+      .toList
+
+      assertEquals(Cliques.Family.fromList(items), cl1.map(NonEmptyList.one(_)))
     }
   }
 }

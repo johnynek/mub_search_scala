@@ -1,12 +1,14 @@
 package org.bykn.mubs
 
-import cats.{Eval, Traverse}
+import cats.{Eval, Order, Traverse}
 import cats.data.{NonEmptyList, NonEmptyLazyList}
 import scala.reflect.ClassTag
 import scala.concurrent.{ExecutionContext, Future}
+import scala.collection.immutable.SortedMap
 import org.typelevel.paiges.Doc
 
 import cats.implicits._
+import scala.collection.immutable
 
 object Cliques {
   /**
@@ -23,6 +25,10 @@ object Cliques {
     // return the same cliqueSize family
     // such that all items have true
     def filter(fn: A => Boolean): Option[Family[A]]
+
+    // given each reversed prefix, see if we need to keep recursing in
+    // this allows us to cut out whole trees without recursing further
+    def filterRevPrefixes(fn: NonEmptyList[A] => Boolean): Option[Family[A]]
 
     def map[B](fn: A => B): Family[B]
 
@@ -51,12 +57,12 @@ object Cliques {
       def cliqueSize: Int = 0
       def cliqueCount: Long = 1L
       def filter(fn: Nothing => Boolean): Option[Family[Nothing]] = Some(Empty)
+      def filterRevPrefixes(fn: NonEmptyList[Nothing] => Boolean) = Some(Empty)
       def map[B](fn: Nothing => B): Family[B] = this
       def toDoc = Doc.text("{}")
     }
-    // invariants:
-    // 1. all items in tails have the same cliqueSize
-    // 2. head < all heads in tails
+    // invariant:
+    // all items in tails have the same cliqueSize
     final case class NonEmpty[A](head: A, tails: NonEmptyLazyList[Family[A]]) extends Family[A] {
       val headOption: Option[A] = Some(head)
       def cliques = tails.flatMap { tail => tail.cliques.map(head :: _) }
@@ -71,6 +77,20 @@ object Cliques {
         }
         else None
 
+      def filterRevPrefixes(fn: NonEmptyList[A] => Boolean): Option[Family[A]] = {
+        def loop(tails: NonEmptyLazyList[Family[A]], prefix: NonEmptyList[A]): Option[Family[A]] =
+          if (fn(prefix)) {
+            NonEmptyLazyList.fromLazyList(tails.toLazyList.flatMap {
+              case Empty => Some(Empty)  
+              case NonEmpty(h, t) => loop(t, h :: prefix)
+            })
+            .map(NonEmpty(prefix.head, _))
+          }
+          else None
+
+        loop(tails, NonEmptyList.one(head))
+      }
+
       def map[B](fn: A => B): Family[B] =
         NonEmpty(fn(head), tails.map(_.map(fn)))
 
@@ -84,6 +104,43 @@ object Cliques {
           Doc.char('}')
       }
     }
+
+    // if the inner lists are all the same size, return this as a family
+    def fromList[A: Order](lst: List[List[A]]): Option[NonEmptyList[Family[A]]] =
+      NonEmptyList.fromList(lst).flatMap { nel0 =>
+        val nel = nel0.distinct
+        val len = nel.head.length
+        if (nel.tail.forall(_.length == len)) {
+          // we have verified the invariant that all inner elements have the same length and are distinct
+          def loop(groups: NonEmptyList[List[A]]): NonEmptyList[Family[A]] =
+            if (groups.head.isEmpty) NonEmptyList.one(Empty)
+            else {
+              val headOrder = groups
+                .iterator
+                .map { nel => nel.head }
+                .zipWithIndex
+                .foldLeft(SortedMap.empty[A, Int](Order[A].toOrdering)) { case (map, (k, idx)) =>
+                  if (map.contains(k)) map  
+                  else map.updated(k, idx)
+                }
+              
+              // preserve the order of the original list
+              val grouped = groups.groupByNem(_.head)(Order[Int].contramap(headOrder))
+
+              grouped
+                .toNel
+                .map { case (head, all) =>
+                  // all is nonEmpty because each inner starts with head 
+                  val allNE = all.map(_.tail)
+                  NonEmpty(head, NonEmptyLazyList.fromNonEmptyList(loop(allNE)))
+                }
+
+            }
+
+          Some(loop(nel))
+        } 
+        else None
+      }
 
     // This is choosing with replacement
     def chooseN[A](n: Int, items: List[A]): LazyList[Family[A]] = {

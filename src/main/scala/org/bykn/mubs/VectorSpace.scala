@@ -587,9 +587,9 @@ object VectorSpace {
             case Nil => LazyList.empty
             case h1 :: Nil => LazyList(h1.map(_ :: Nil))
             case f1 :: tail =>
+              val headBases: LazyList[List[Int]] = f1.cliques.toLazyList
+
               loop(tail).flatMap { tailFam =>
-                // now   
-                val headBases: LazyList[List[Int]] = f1.cliques.toLazyList
                 headBases.flatMap { basis =>
                   // Need to be orthogonal to everything in the tail
                   tailFam.filter(tailBases =>
@@ -715,7 +715,7 @@ object VectorSpace {
                 val trans: Iterator[Mubs] =
                   Cliques.Family.chooseN(cnt, bases)
                     .iterator
-                    .flatMap { hs: Cliques.Family[Cliques.Family[Int]] =>
+                    .flatMap { (hs: Cliques.Family[BasisF]) =>
                       transformStdBasis(hs, ubv, ubBitSet).iterator
                     }
 
