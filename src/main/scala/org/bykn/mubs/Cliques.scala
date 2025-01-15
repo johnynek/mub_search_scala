@@ -61,6 +61,7 @@ object Cliques {
               case Nil => false
             }
         }
+
     }
 
     final case object Empty extends Family[Nothing] {

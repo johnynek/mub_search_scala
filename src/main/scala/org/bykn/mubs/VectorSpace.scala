@@ -534,25 +534,84 @@ object VectorSpace {
 
     // transform all but the first with a the corresponding mub
     // we add back the 0 vector to the front in the results
-    private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family.NonEmpty[Int], ubBitSet: BitSet): LazyList[Mubs] = {
+    private def transformStdBasis(hs: Cliques.Family[BasisF], mubs: Cliques.Family.NonEmpty[Int], ubBitSet: BitSet): LazyList[List[Basis]] = {
       // at this point there are exactly cnt elements in each hs family, and cnt - 1 elements in mubs
       // which will be extended to cnt with the 0 vector
 
       import Cliques.Family
 
+      val mubWithZero = mubs.prefix(0)
+
+      def toFull(b0: Basis, mub: Int): Basis = {
+        // we have to do the conjugate twice
+        val conjMub = conjProdInt(mub, 0)
+        (0 :: b0).map { v =>
+          conjProdInt(conjMub, v)
+        }
+      }
+
+      def unbiasedVec(left: Int, leftMub: Int, right: Int, rightMub: Int): Boolean = {
+        // we switch the phase because we put it on the left
+        val overall = conjProdInt(rightMub, leftMub)
+        ubBitSet.get(conjProdInt(overall, conjProdInt(left, right)))
+      }
+
+      def expand(prod: Family[(BasisF, Int)]): LazyList[List[Basis]] = {
+        def loop(prod: Family[(BasisF, Int)], acc: List[(Basis, Int)]): LazyList[List[Basis]] =
+          prod match {
+            case Family.Empty => LazyList(acc.map { case (b, m) => toFull(b, m) })
+            case Family.NonEmpty((b, m), tails) =>
+              // filter (b, m) against the acc
+              val ubHead = b.filterRevPrefixes { vecs =>
+                // all these vecs have to be unbiased wrt to acc  
+                val vhead = vecs.head
+                acc.forall { case (basis, mub) =>
+                  // we have to swap order here because we are putting it on the left
+                  val overall = conjProdInt(m, mub)
+                  basis.forall { v =>
+                    // we only need to check the head of vecs, the previous have been checked
+                    ubBitSet.get(conjProdInt(overall, conjProdInt(v, vhead)))
+                  }
+                }
+              }
+              .to(LazyList)
+
+              for {
+                basisFam <- ubHead
+                basis <- basisFam.cliques.toLazyList
+                acc1 = (basis, m) :: acc
+                tail <- tails.toLazyList
+                bases <- loop(tail, acc1) 
+              } yield bases
+          }
+          
+
+        loop(prod, Nil)
+      }
+
+      Family.product(hs, mubWithZero) match {
+        case None => sys.error(s"invariant violation: wrong Family sizes: hs=${hs.cliqueSize} mubWithZero=${mubWithZero.cliqueSize}")
+        case Some(prod) => expand(prod)
+      }
+
+      /*
+
       // the basis is a standard basis (missing the first all 0 vector)
       // the int is a MUB vector to be applied to this basis
       def areUnbiased(b0: (Basis, Int), b1: (Basis, Int)): Boolean = {
         // both bases are augmented with the 0 value
-        // we switch the phase because we put it on the left
-        val overall = conjProdInt(b1._2, b0._2)
+        val mub0 = b0._2
+        val mub1 = b1._2
         val v1s = (0 :: b1._1)
+        // we switch the phase because we put it on the left
+        val overall = conjProdInt(mub1, mub0)
         (0 :: b0._1).forall { v0 =>
           v1s.forall { v1 =>
             ubBitSet.get(conjProdInt(overall, conjProdInt(v0, v1)))
           }
         }
       }
+
 
       def hasUnbiased(b0: (BasisF, Int), b1: (BasisF, Int)): Boolean = {
         val (h0, v0) = b0
@@ -562,14 +621,6 @@ object VectorSpace {
           h1.cliques.exists { m1 =>
             areUnbiased(x0, (m1, v1))
           }
-        }
-      }
-
-      def toFull(b0: Basis, mub: Int): Basis = {
-        // we have to do the conjugate twice
-        val conjMub = conjProdInt(mub, 0)
-        (0 :: b0).map { v =>
-          conjProdInt(conjMub, v)
         }
       }
 
@@ -607,7 +658,6 @@ object VectorSpace {
         loop(toFulls)
       }
 
-      val mubWithZero = mubs.prefix(0)
       Cliques.Family.cliqueMerge(hs, mubWithZero)(hasUnbiased(_, _)) match {
         case None => LazyList.empty
         case Some(fam) =>
@@ -621,6 +671,7 @@ object VectorSpace {
               keepGood(bi)
             }
       }
+      */
       /*
 
       // TODO we are still using expand
@@ -712,17 +763,15 @@ object VectorSpace {
                 //
                 // these are as cheap to compute as iterate so don't keep them
                 // in memory
-                val trans: Iterator[Mubs] =
+                val trans: Iterator[List[Basis]] =
                   Cliques.Family.chooseN(cnt, bases)
                     .iterator
                     .flatMap { (hs: Cliques.Family[BasisF]) =>
-                      transformStdBasis(hs, ubv, ubBitSet).iterator
+                      transformStdBasis(hs, ubv, ubBitSet)
                     }
 
                 val res: List[List[List[Int]]] =
-                  trans
-                    .flatMap(_.cliques.toLazyList)
-                    .toList
+                  trans.toList
 
                 val thisCount = res.length
                 val current = mubsCount.addAndGet(thisCount)
