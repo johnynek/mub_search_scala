@@ -1,0 +1,10 @@
+2025-01-16:
+
+after about 1-2h
+./mubs search --dim 6 --root 12 --mubs 3
+found: Some(Map(0 -> List(131419, 76800, 10153, 7925, 510, 0), 1 -> List(221165, 187224, 115972, 111344, 84900, 33958), 2 -> List(244031, 220621, 145433, 92549, 70990, 42514)))
+
+so, 12 isn't enough
+
+as 11:08 started:
+./mubs search --dim 6 --root 15 --mubs 3

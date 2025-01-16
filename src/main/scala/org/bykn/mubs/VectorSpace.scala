@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.BitSet
 import java.util.zip.GZIPInputStream
 import java.nio.file.Path
+import org.typelevel.paiges.Doc
 import scala.concurrent.duration.Duration.Inf
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
@@ -806,6 +807,18 @@ object VectorSpace {
 
     def allMubs(orthSet: BitSet, ubBitSet: BitSet, cnt: Int): List[List[List[Int]]] =
       Await.result(allMubsFuture(orthSet, ubBitSet, cnt)(ExecutionContext.global), Inf)
+
+    def showBasis(v: List[List[Int]]): Doc = {
+      val ary = new Array[Int](dim)
+      def bracket[A](it: Iterable[Doc], line: Doc = Doc.line): Doc =
+        Doc.char('[') + ((Doc.lineBreak + Doc.intercalate(Doc.comma + line, it)).nested(4) + Doc.lineBreak).grouped + Doc.char(']')
+
+      def showInt(i: Int): Doc = {
+        intToVector(i, ary)
+        bracket(ary.map(Doc.str(_)))
+      }
+      bracket(v.map { vs => bracket(vs.map(showInt)) }, Doc.hardLine)
+    }
   }
 
   // return lists of exactly n items where each item
@@ -1040,18 +1053,8 @@ object VectorSpace {
 
           val mubsVector = limit.fold(mubsVector0)(mubsVector0.take(_))
           var idx = 0
-          val ary = new Array[Int](space.dim)
-
           mubsVector.foreach { clique =>
-            def showBasis(v: List[List[Int]]): String = {
-              def showInt(i: Int): String = {
-                space.intToVector(i, ary)
-                ary.mkString("[", ", ", "]")
-              }
-              v.map { vs => vs.map(showInt).mkString("[[", ", ", "]]") }.mkString("[[[\n\t", ",\n\t", "\n]]")
-            }
-
-            val cliqueStr = showBasis(clique)
+            val cliqueStr = space.showBasis(clique).render(80)
             println(s"$idx: $cliqueStr")
             idx = idx + 1
           }
@@ -1076,9 +1079,14 @@ object VectorSpace {
         orthSet,
         mubSet)
 
-      println(s"found: ${mubBuild.firstCompleteExample}")
-      if (showCount) {
-        println(s"count: ${mubBuild.completeCount}")
+      mubBuild.firstCompleteExample match {
+        case Some(first) =>
+          println("first basis:\n" + space.showBasis(first.toList.sortBy(_._1).map(_._2)).render(80))
+          if (showCount) {
+            println(s"count: ${mubBuild.completeCount}")
+          }
+        case None =>
+          println(s"no set of $mubs hadamards")
       }
     }
   }

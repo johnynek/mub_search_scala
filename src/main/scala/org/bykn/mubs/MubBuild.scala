@@ -3,6 +3,7 @@ package org.bykn.mubs
 import cats.data.OneAnd
 import java.util.BitSet
 import scala.collection.immutable.SortedSet
+import org.typelevel.paiges.Doc
 
 import cats.implicits._
 
@@ -41,11 +42,20 @@ object MubBuild {
 
     val pOrth = orthBitSet.cardinality.toDouble / standardCount
     val pUb = ubBitSet.cardinality.toDouble / standardCount
+    private var addVectorCount: Long = 0L
 
     println(s"pOrth = $pOrth, pUb = $pUb")
 
     def orthFn(i: Int, j: Int): Boolean =
       orthBitSet.get(cpFn(i, j))
+
+    def docBases(bases: Bases): Doc = {
+      Doc.intercalate(Doc.line, bases.toList.map { case (idx, (basis, candidates)) =>
+        Doc.text(s"$idx. ") + Doc.char('[') +
+          (Doc.line + Doc.intercalate(Doc.line, basis.map(Doc.str(_))) + Doc.line).nested(4).grouped +
+          Doc.char(']') + Doc.text(s" candidate_size=${candidates.size}") 
+      })
+    }
 
     def unbiasedFn(i: Int, j: Int): Boolean =
       ubBitSet.get(cpFn(i, j))
@@ -67,6 +77,17 @@ object MubBuild {
       bases(i)._1
 
     def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] = {
+      addVectorCount += 1L
+
+      if (addVectorCount % 10000000L == 0L) {
+        val debugMsg = docBases(bases) + Doc.line +
+          Doc.text(s"addVectorCount=$addVectorCount") + Doc.line +
+          Doc.text(s"instant=${java.time.Instant.now()}") 
+
+        println(debugMsg.render(80))
+        println("")
+      }
+
       val basisi = bases(i)._1
       val mini = if (basisi.isEmpty) vec else basisi.last
 
@@ -181,10 +202,28 @@ object MubBuild {
     def extendFully(b: Bases, depth: Int): Option[Tree.NonEmpty[LazyList, Bases]] = {
       if (isComplete(b)) Some(Tree.NonEmpty[LazyList, Bases](b, LazyList.empty))
       else {
-        // we have to check all,
-        // we might as well try to find the most probable
-        // first
+        // we can choose the order in which we search. We don't have to search all of the bases
+        // we can select which of the bases we search next
+
+        val smallestBranch =
+          hads.sortBy { i =>
+              val cnt = extensionSize(b, i)
+              if (cnt > 0) cnt
+              else Int.MaxValue // put 0 last, it can't be extended
+            }
+            .head
+
+        extendBasis(b, smallestBranch, depth).flatMap {
+          case n @ Tree.NonEmpty(_, _) =>
+            Some(Tree.NonEmpty(b, LazyList(n)))
+          case _ => None
+        }
+
+        /*
         val greatestToLeast =
+          // we have to check all,
+          // we might as well try to find the most probable
+          // first, note we can't stop early on these
           hads.sortBy(extensionSize(b, _)).reverse
 
         val children = greatestToLeast
@@ -196,6 +235,7 @@ object MubBuild {
 
         if (children.nonEmpty) Some(Tree.NonEmpty(b, children))
         else None
+        */
       }
     }
 
