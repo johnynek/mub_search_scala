@@ -24,11 +24,11 @@ object SearchApp extends CommandApp(
 
     val goalMubs = Opts.option[Int]("mubs", "the number of mutually unbiased bases we try to find")
 
-    val threads: Opts[(ExecutionContext => Unit) => Unit] =
+    val threadCount: Opts[(Int, (ExecutionContext => Unit) => Unit)] =
       Opts.option[Int]("threads", "number of threads to use, default = number of processors")
         .withDefault(Runtime.getRuntime().availableProcessors())
         .map { t =>
-          { (callback: ExecutionContext => Unit) =>
+          (t, { (callback: ExecutionContext => Unit) =>
             val eserv = Executors.newFixedThreadPool(t)
             try {
               val ec = ExecutionContext.fromExecutorService(eserv)
@@ -37,9 +37,10 @@ object SearchApp extends CommandApp(
             finally {
               eserv.shutdown()
             }
-          }
+          })
         }
 
+    val threads = threadCount.map(_._2)
 
     val root = Opts.option[Int]("root", "what root of unity")
 
@@ -109,8 +110,8 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
-      (spaceOpt, goalMubs.orNone, threads, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse)
-        .mapN { case (space, mubsOpt, cont, pathFn, showCount) =>
+      (spaceOpt, goalMubs.orNone, threadCount, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse)
+        .mapN { case (space, mubsOpt, (partitions, cont), pathFn, showCount) =>
           // dim is the most we can get
           val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
           val mubs = mubsOpt.getOrElse(space.dim)
@@ -118,7 +119,7 @@ object SearchApp extends CommandApp(
           cont { implicit ec =>
             val orthBS = VectorSpace.readPath(space, true, orthPath)
             val ubBS = VectorSpace.readPath(space, false, ubPath)
-            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, showCount), Inf)
+            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, showCount, partitions), Inf)
           }
         }
 

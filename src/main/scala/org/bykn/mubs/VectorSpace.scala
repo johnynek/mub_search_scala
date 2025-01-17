@@ -1067,7 +1067,8 @@ object VectorSpace {
     orthSet: BitSet,
     mubSet: BitSet,
     mubs: Int,
-    showCount: Boolean)(implicit ec: ExecutionContext): Future[Unit] = {
+    showCount: Boolean,
+    partitions: Int)(implicit ec: ExecutionContext): Future[Unit] = {
 
     Future {
       println(s"# $space")
@@ -1079,16 +1080,17 @@ object VectorSpace {
         orthSet,
         mubSet)
 
-      mubBuild.firstCompleteExample match {
+      mubBuild.asyncResult(partitions).map(_.firstCompleteExample match {
         case Some(first) =>
           println("first basis:\n" + space.showBasis(first.toList.sortBy(_._1).map(_._2)).render(80))
           if (showCount) {
-            println(s"count: ${mubBuild.completeCount}")
+            println(s"count: ${mubBuild.syncResult.completeCount}")
           }
         case None =>
           println(s"no set of $mubs hadamards")
-      }
+      })
     }
+    .flatten
   }
 
   val realBits: Opts[Int] = Opts.option[Int]("bits", "number of bits to use in computable reals, default = 30").withDefault(30)

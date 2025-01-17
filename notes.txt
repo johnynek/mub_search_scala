@@ -2,9 +2,13 @@
 
 after about 1-2h
 ./mubs search --dim 6 --root 12 --mubs 3
+# Space(dim = 6, roots = 12, standardCount = 248832, realBits = 30, epsOrth = 1.5663143066406190985808747347458681223249, epsUb = 0.6394451380151236703928561873333688820459, ubEpsIsTrivial = false)
+pOrth = 0.3322723765432099, pUb = 0.3842552404835391
 found: Some(Map(0 -> List(131419, 76800, 10153, 7925, 510, 0), 1 -> List(221165, 187224, 115972, 111344, 84900, 33958), 2 -> List(244031, 220621, 145433, 92549, 70990, 42514)))
 
 so, 12 isn't enough
 
-as 11:08 started:
+as 11:32 started:
 ./mubs search --dim 6 --root 15 --mubs 3
+# Space(dim = 6, roots = 15, standardCount = 759375, realBits = 30, epsOrth = 1.2543415592118416567980098576299774289679, epsUb = 0.5120827972060107633480593090003329224602, ubEpsIsTrivial = false)
+pOrth = 0.21628312757201645, pUb = 0.3155753086419753

@@ -4,6 +4,8 @@ import cats.data.OneAnd
 import java.util.BitSet
 import scala.collection.immutable.SortedSet
 import org.typelevel.paiges.Doc
+import java.util.concurrent.atomic.AtomicLong
+import scala.concurrent.{ExecutionContext, Future}
 
 import cats.implicits._
 
@@ -42,7 +44,7 @@ object MubBuild {
 
     val pOrth = orthBitSet.cardinality.toDouble / standardCount
     val pUb = ubBitSet.cardinality.toDouble / standardCount
-    private var addVectorCount: Long = 0L
+    private val addVectorCount = new AtomicLong(0L)
 
     println(s"pOrth = $pOrth, pUb = $pUb")
 
@@ -77,11 +79,11 @@ object MubBuild {
       bases(i)._1
 
     def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] = {
-      addVectorCount += 1L
+      val currentCount = addVectorCount.incrementAndGet()
 
-      if (addVectorCount % 10000000L == 0L) {
+      if (currentCount % 10000000L == 0L) {
         val debugMsg = docBases(bases) + Doc.line +
-          Doc.text(s"addVectorCount=$addVectorCount") + Doc.line +
+          Doc.text(s"addVectorCount=$currentCount") + Doc.line +
           Doc.text(s"instant=${java.time.Instant.now()}") 
 
         println(debugMsg.render(80))
@@ -341,26 +343,52 @@ object MubBuild {
         .flatMap(firstComplete(_))
         .map(_.map { case (k, (v, _)) => (k, v) })
 
-    lazy val fullBases: Option[Tree.NonEmpty[LazyList, Bases]] = extendFully(initBasis, 0)
+    case class Result(fullBases: List[Tree.NonEmpty[LazyList, Bases]]) {
+      lazy val firstCompleteExample: Option[Map[Int, List[Int]]] =
+        fullBases.flatMap(firstComplete(_))
+          .map(_.map { case (k, (v, _)) => (k, v) })
+          .headOption
 
-    lazy val firstCompleteExample: Option[Map[Int, List[Int]]] =
-      fullBases.flatMap(firstComplete(_))
-        .map(_.map { case (k, (v, _)) => (k, v) })
+      lazy val completeCount: Long = {
+        def completeCountOf(n: Tree[LazyList, Bases]): Long =
+          n match {
+            case Tree.Empty() => 0L
+            case Tree.NonEmpty(h, cs) =>
+              val rest = cs.foldLeft(0L) { (acc, t) => acc + completeCountOf(t) }
+              val hcount = if (isComplete(h)) 1L else 0L
+              hcount + rest
+          }
 
-    lazy val completeCount: Long = {
-      def completeCountOf(n: Tree[LazyList, Bases]): Long =
-        n match {
-          case Tree.Empty() => 0L
-          case Tree.NonEmpty(h, cs) =>
-            val rest = cs.foldLeft(0L) { (acc, t) => acc + completeCountOf(t) }
-            val hcount = if (isComplete(h)) 1L else 0L
-            hcount + rest
+        fullBases.iterator.map { t =>
+          completeCountOf(t)
         }
-
-      fullBases match {
-        case None => 0
-        case Some(t) => completeCountOf(t)
+        .sum
       }
+    }
+
+    // Run this synchonously to get the result
+    lazy val syncResult: Result = Result(extendFully(initBasis, 0).toList)
+
+    def asyncResult(partitions: Int)(implicit ec: ExecutionContext): Future[Result] = {
+      require(partitions > 0, s"require partitions $partitions > 0")
+
+      val chunkSize = orthToZero.size / partitions
+
+      val partitioned: List[Bases] =
+        (0 until partitions).map { part =>
+          val offset = chunkSize * part
+          hads.map {
+            case 0 => (0, (0 :: Nil, orthToZero.drop(offset).take(chunkSize)))
+            case i => (i, (Nil, ubToZero))
+          }
+          .toMap
+        }
+        .toList
+
+      Future.traverse(partitioned.toVector) { part =>
+        Future { extendFully(part, 0) }
+      }
+      .map(rs => Result(rs.toList.flatten))
     }
   }
 }
