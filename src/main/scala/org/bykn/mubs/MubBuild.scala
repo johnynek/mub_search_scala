@@ -38,7 +38,8 @@ object MubBuild {
     val goalHads: Int,
     cpFn: (Int, Int) => Int,
     orthBitSet: BitSet,
-    ubBitSet: BitSet) {
+    ubBitSet: BitSet,
+    optPart: Option[Partitioned]) {
 
     import scala.math.pow
 
@@ -47,6 +48,11 @@ object MubBuild {
     private val addVectorCount = new AtomicLong(0L)
 
     println(s"pOrth = $pOrth, pUb = $pUb")
+
+    private val filterFn = optPart match {
+      case Some(p) => { (i: List[Int]) => p.selectByHash(i) }
+      case None => { (i: List[Int]) => true }
+    }
 
     def orthFn(i: Int, j: Int): Boolean =
       orthBitSet.get(cpFn(i, j))
@@ -127,7 +133,14 @@ object MubBuild {
               else {
                 val v1 = vec :: vecs
                 val s2 = if (nextLen >= dim) SortedSet.empty[Int] else s1
-                Some((basis, (v1, s2)))
+                def next = Some((basis, (v1, s2)))
+
+                if (nextLen > 2) {
+                  // we have filled a basis, we only keep this if we match the hash
+                  if (filterFn(v1)) next
+                  else None
+                }
+                else next
               }
             }
             else {
@@ -367,28 +380,30 @@ object MubBuild {
     }
 
     // Run this synchonously to get the result
-    lazy val syncResult: Result = Result(extendFully(initBasis, 0).toList)
+    def syncResult: Result = Result(extendFully(initBasis, 0).toList)
 
-    def asyncResult(partitions: Int)(implicit ec: ExecutionContext): Future[Result] = {
-      require(partitions > 0, s"require partitions $partitions > 0")
+    def asyncResult(threads: Int)(implicit ec: ExecutionContext): Future[Result] =
+      if (threads == 1) Future(syncResult)
+      else {
+        require(threads > 0, s"require threads $threads > 0")
 
-      val chunkSize = orthToZero.size / partitions
+        // round up by adding 1
+        val chunkSize = (orthToZero.size / threads) + 1
+        require(chunkSize * threads >= orthToZero.size)
 
-      val partitioned: List[Bases] =
-        (0 until partitions).map { part =>
-          val offset = chunkSize * part
-          hads.map {
-            case 0 => (0, (0 :: Nil, orthToZero.drop(offset).take(chunkSize)))
-            case i => (i, (Nil, ubToZero))
+        val nextList = orthToZero.toList
+
+        Future.traverse((0 until threads).toVector) { part =>
+          Future {
+            val offset = chunkSize * part
+          
+            nextList.drop(offset).take(chunkSize).flatMap { i =>
+              addVector(initBasis, 0, i)
+                .flatMap(extendFully(_, 1))
+            }
           }
-          .toMap
         }
-        .toList
-
-      Future.traverse(partitioned.toVector) { part =>
-        Future { extendFully(part, 0) }
-      }
-      .map(rs => Result(rs.toList.flatten))
+        .map(rs => Result(rs.toList.flatten))
     }
   }
 }

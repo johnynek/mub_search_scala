@@ -110,8 +110,8 @@ object SearchApp extends CommandApp(
         .map { case ((b, d), fn) => fn(d, b) }
 
     val search =
-      (spaceOpt, goalMubs.orNone, threadCount, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse)
-        .mapN { case (space, mubsOpt, (partitions, cont), pathFn, showCount) =>
+      (spaceOpt, goalMubs.orNone, threadCount, tableOpts, Opts.flag("count", "show the total count (default false)").orFalse, Partitioned.opts.orNone)
+        .mapN { case (space, mubsOpt, (partitions, cont), pathFn, showCount, optPart) =>
           // dim is the most we can get
           val (orthPath, ubPath) = pathFn(space.dim, space.C.roots.length)
           val mubs = mubsOpt.getOrElse(space.dim)
@@ -119,7 +119,7 @@ object SearchApp extends CommandApp(
           cont { implicit ec =>
             val orthBS = VectorSpace.readPath(space, true, orthPath)
             val ubBS = VectorSpace.readPath(space, false, ubPath)
-            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, showCount, partitions), Inf)
+            Await.result(VectorSpace.search(space, orthBS, ubBS, mubs, showCount, partitions, optPart), Inf)
           }
         }
 

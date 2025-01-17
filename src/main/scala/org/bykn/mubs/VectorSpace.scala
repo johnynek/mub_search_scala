@@ -1068,7 +1068,9 @@ object VectorSpace {
     mubSet: BitSet,
     mubs: Int,
     showCount: Boolean,
-    partitions: Int)(implicit ec: ExecutionContext): Future[Unit] = {
+    threads: Int,
+    optPart: Option[Partitioned]
+    )(implicit ec: ExecutionContext): Future[Unit] = {
 
     Future {
       println(s"# $space")
@@ -1078,9 +1080,10 @@ object VectorSpace {
         mubs,
         space.conjProdInt _,
         orthSet,
-        mubSet)
+        mubSet,
+        optPart.flatMap(_.nonTrivial))
 
-      mubBuild.asyncResult(partitions).map(_.firstCompleteExample match {
+      mubBuild.asyncResult(threads).map(_.firstCompleteExample match {
         case Some(first) =>
           println("first basis:\n" + space.showBasis(first.toList.sortBy(_._1).map(_._2)).render(80))
           if (showCount) {
@@ -1156,7 +1159,8 @@ object VectorSpace {
         goalHads = 3,
         space.conjProdInt _,
         orthSet,
-        mubSet)
+        mubSet,
+        None)
 
 
       chooseWOR(2, Vect.standardBasisDim3[N, K3, C])

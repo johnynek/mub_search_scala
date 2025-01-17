@@ -12,3 +12,17 @@ as 11:32 started:
 ./mubs search --dim 6 --root 15 --mubs 3
 # Space(dim = 6, roots = 15, standardCount = 759375, realBits = 30, epsOrth = 1.2543415592118416567980098576299774289679, epsUb = 0.5120827972060107633480593090003329224602, ubEpsIsTrivial = false)
 pOrth = 0.21628312757201645, pUb = 0.3155753086419753
+
+0. [ 378632 298858 28921 19147 1028 0 ] candidate_size=0
+1. [ 620038 502803 278512 84972 ] candidate_size=7
+2. [  ] candidate_size=9
+addVectorCount=10000000
+instant=2025-01-16T21:32:52.633205Z
+
+stopped to rewrite in parallel mode
+
+// With parallel:
+oscar@macmini mub_search_scala % ./mubs search --dim 6 --root 15 --mubs 3
+Thu Jan 16 14:32:57 HST 2025
+# Space(dim = 6, roots = 15, standardCount = 759375, realBits = 30, epsOrth = 1.2543415592118416567980098576299774289679, epsUb = 0.5120827972060107633480593090003329224602, ubEpsIsTrivial = false)
+pOrth = 0.21628312757201645, pUb = 0.3155753086419753
