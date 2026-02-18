@@ -65,41 +65,40 @@ object VectorSpace {
 
     val realD: Real = Real(dim)
 
-    /**
-     * See: https://chatgpt.com/share/678566bc-9864-8010-96c2-58b6477a2e2c
-     * 
-     * This is 2d * sin(pi/(2n)) when n>=1
-     * when we are looking for othogonal vectors
-     */
-    val epsOrth: Real = {
-      // theta = 2 pi / n
-      // C.omega = e^(2 pi i / n)
-      // C.omega ^(1/2) = e^(pi i /n)
-      // 2 d sin(theta/4) = ((1 - cos(theta/2))/2).sqrt
-
+    // Each standardized vector has one fixed entry (1), so only (d - 1) entries
+    // can incur phase quantization error.
+    //
+    // If theta = 2pi/n then the max distance from a unit complex number to the
+    // nearest n-th root is:
+    //   2 sin(theta/4) = 2 sin(pi/(2n))
+    // (attained at cell midpoints).
+    //
+    // Summing the (d - 1) per-entry errors gives the sharp worst-case bound
+    // under these assumptions.
+    private val perEntryQuantError: Real = {
       val cos = C.reOmega
       val halfCos = Cyclotomic.halfCos(cos)
       val quartSin = Cyclotomic.halfSinOfCos(halfCos)
-      Real.two * realD * quartSin
+      Real.two * quartSin
     }
 
     /**
-     * See: https://chatgpt.com/share/678566bc-9864-8010-96c2-58b6477a2e2c
-     * 
-     * This is 2 sqrt(d) * sin(pi/(2n)) when n>=1
-     * when we are looking for unbiased vectors
+     * Orthogonality tolerance for quantized tables.
+     *
+     * If the exact inner product is 0, then:
+     *   |<q>| <= (d - 1) * 2 sin(pi/(2n)).
      */
-    val epsUb: Real = {
-      // theta = 2 pi / n
-      // C.omega = e^(2 pi i / n)
-      // C.omega ^(1/2) = e^(pi i /n)
-      // 2 sqrt(d) sin(theta/4) = ((1 - cos(theta/2))/2).sqrt
+    val epsOrth: Real =
+      Real(dim - 1) * perEntryQuantError
 
-      val cos = C.reOmega
-      val halfCos = Cyclotomic.halfCos(cos)
-      val quartSin = Cyclotomic.halfSinOfCos(halfCos)
-      Real.two * realD.sqrt * quartSin
-    }
+    /**
+     * Unbiasedness tolerance for quantized tables.
+     *
+     * If the exact inner product magnitude is sqrt(d), then:
+     *   ||<q>| - sqrt(d)| <= (d - 1) * 2 sin(pi/(2n)).
+     */
+    val epsUb: Real =
+      Real(dim - 1) * perEntryQuantError
 
     override def toString: String = {
       s"Space(dim = $dim, roots = ${nroots}, standardCount = $standardCount, realBits = $realBits, epsOrth = $epsOrth, epsUb = $epsUb, ubEpsIsTrivial = $ubEpsIsTrivial)"
@@ -122,13 +121,16 @@ object VectorSpace {
       vec.map(nearest)
     }
 
-    //if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)
+    // If we quantize a standardized phase-difference vector (first component fixed
+    // to 1), the inner product magnitude error is <= eps with
+    // eps = (d - 1) * 2 sin(pi/(2n)).
     def quantizationBoundGap(v1: List[Complex[Real]], v2: List[Complex[Real]]): Real = {
       require(v1.length == v2.length)
       require(v1.length == dim)
 
-      val exact = innerAbs2(v1, v2).sqrt
-      val quant = innerAbs2(quantize(v1), quantize(v2)).sqrt
+      val rel = v1.zip(v2).map { case (u, v) => u.conjugate * v }
+      val exact = Ring[Complex[Real]].sum(rel).abs
+      val quant = Ring[Complex[Real]].sum(quantize(rel)).abs
       val left = (exact - quant).abs
       val right = epsOrth
 

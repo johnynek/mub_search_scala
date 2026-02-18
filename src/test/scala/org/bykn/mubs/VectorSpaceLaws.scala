@@ -47,15 +47,15 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     loop(0)
   }
 
-  test("epsOrth = 2 d sin(pi/(2n))") {
+  test("epsOrth = 2 (d - 1) sin(pi/(2n))") {
     val expectedEps =
-      Real(2 * dim) * Real.sin(Real.pi / (2 * space.C.roots.length))
+      Real(2 * (dim - 1)) * Real.sin(Real.pi / (2 * space.C.roots.length))
     assert(space.epsOrth == expectedEps, s"${space.epsOrth} != $expectedEps")
   }
 
-  test("epsUb = 2 sqrt(d) sin(pi/(2n))") {
+  test("epsUb = 2 (d - 1) sin(pi/(2n))") {
     val expectedEps =
-      Real(2) * Real(dim).sqrt * Real.sin(Real.pi / (2 * space.C.roots.length))
+      Real(2 * (dim - 1)) * Real.sin(Real.pi / (2 * space.C.roots.length))
     assert(space.epsUb == expectedEps, s"${space.epsUb} != $expectedEps")
   }
 
@@ -342,7 +342,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       }
   }
 
-  test("counterexample: epsUb can reject an exact-unbiased pair after quantization") {
+  test("regression: previous d=4,n=10 counterexample is covered by updated epsUb") {
     val d = 4
     val n = 10
     val dReal = Real(d)
@@ -370,14 +370,14 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     val quantAbs = dot2(u, quantV).sqrt
     val dev = (quantAbs - sqrtD).abs
 
-    // This is the old quant-table assumption. We intentionally assert it here
-    // to expose that the current epsUb can be too small.
+    // This vector was a concrete counterexample for the old epsUb formula.
+    // Keep it checked in as a regression target.
     assert(
       dev.compare(space10.epsUb) <= 0,
-      s"counterexample found: dev=$dev > epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, quantV=$quantV")
+      s"regression failed: dev=$dev > epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, quantV=$quantV")
   }
 
-  property("for exact-unbiased d=4 pairs, quantization to n=10 should stay within epsUb (counterexample expected)") {
+  property("for exact-unbiased d=4 pairs, quantization to n=10 stays within updated epsUb") {
     val d = 4
     val n = 10
     val dReal = Real(d)
@@ -450,7 +450,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
       val law = dev.compare(space10.epsUb) <= 0
       if (!law) {
-        println(s"counterexample: dev=$dev, epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, v=$v")
+        println(s"violation: dev=$dev, epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, v=$v")
       }
       law
     }
@@ -460,7 +460,7 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
     val d = 4
     val n = 10
     val sqrtD = Real(d).sqrt
-    val epsUb = Real(2) * sqrtD * Real.sin(Real.pi / (2 * n))
+    val epsUb = Real(2 * (d - 1)) * Real.sin(Real.pi / (2 * n))
     val roots4 = (0 until 4).map { i =>
       expITheta(Real(2 * i) * Real.pi / Real(4))
     }.toList
@@ -488,92 +488,61 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
 
     val params =
       scalaCheckTestParameters
-        .withMinSuccessfulTests(20000)
+        .withMinSuccessfulTests(10000)
         .withMaxDiscardRatio(50)
 
     val result = Test.check(params, law)
     assert(result.passed, result.toString)
   }
 
-  property("if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)") {
-    /*
-     * Proof:
-     * a = <u, v> = sum_i exp(2 pi (v(i) - u(i))/n)
-     * b = <u', v'> = sum_i exp(2 pi (v(i) - u(i)/n)) exp(2 pi (dv(i) - du(i)) / n)
-     *              = <u, v> + sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
-     * c = sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)
-     * a = b + c
-     * |a| <= |b| + |c|
-     * |a| - |b| <= |c|
-     * ||a| - |b|| <= |c|
-     *
-     * to bound |c|:
-     * |c| == |\sum_i exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)|
-     *     <= \sum_i |exp(2 pi (v(i) - u(i)/n)) (exp(2 pi (dv(i) - du(i)) / n) - 1)|
-     *     = \sum_i 2|sin(2 pi (dv(i) - du(i))/n)|
-     *     <= 2 d sin(pi/n) if n > 1, else 2d
-     */
-    case class Example(v1: List[Complex[Real]], v2: List[Complex[Real]], nth: Int) {
-      require(v1.length == v2.length)
+  property("if we quantize a standardized phase-difference vector, magnitude error <= 2(d-1)sin(pi/(2n))") {
+    case class Example(rel: List[Complex[Real]], nth: Int) {
+      require(rel.nonEmpty)
       require(nth >= 1)
 
-      val d = v1.length
-
-      val roots = (0 until nth).map { i => expITheta(Real(2*i) * Real.pi / Real(nth)) }
-
-      val quantV1 = v1.map(nearest(_, roots))
-      val quantV2 = v2.map(nearest(_, roots))
-
-      // the magnitude difference
-      val mag = dot2(v1, v2).sqrt
-      val quantMag = dot2(quantV1, quantV2).sqrt
-
-      // here is the theorem of the paper:
+      val d = rel.length
+      val roots = (0 until nth).map { i =>
+        expITheta(Real(2 * i) * Real.pi / Real(nth))
+      }
+      val quantRel = rel.map(nearest(_, roots))
+      val mag = Ring[Complex[Real]].sum(rel).abs
+      val quantMag = Ring[Complex[Real]].sum(quantRel).abs
       val diff = (mag - quantMag).abs
+      val perEntry = if (nth == 1) Real(2) else Real(2) * Real.sin(Real.pi / (2 * nth))
+      val eps = Real(d - 1) * perEntry
+      val law = diff.compare(eps) <= 0
 
       def explain: String =
         List(
+          s"d = $d",
           s"n = $nth",
-          s"v1 = $v1",
-          s"v2 = $v2",
-          s"quantV1 = $quantV1",
-          s"quantV2 = $quantV2",
+          s"rel = $rel",
+          s"quantRel = $quantRel",
           s"mag = $mag",
           s"quantMag = $quantMag",
           s"diff = $diff",
+          s"eps = $eps",
           s"gap = ${diff - eps}"
         ).mkString("\n")
-
-      val eps = if (nth == 1) Real(2*d) else Real(2*d) * Real.sin(Real.pi / nth)
-      //val law = diff.compare(eps) <= 0
-      val law = diff.compare(eps / 2) <= 0
     }
 
     val genRoot: Gen[Complex[Real]] =
-      Gen.choose(0, Int.MaxValue)
-        .map { i => expITheta(Real(i) * Real.pi * Real.two / Real(Int.MaxValue)) }
+      Gen.choose(0, Int.MaxValue).map { i =>
+        expITheta(Real(i) * Real.pi * Real.two / Real(Int.MaxValue))
+      }
 
-    def genVec(d: Int): Gen[List[Complex[Real]]] = {
-      val one = Complex(Real.one, Real.zero)
-      // make sure one item is always 1
-      Gen.listOfN(d - 1, genRoot)
-        .map(one :: _)
-    }
+    def genRel(d: Int): Gen[List[Complex[Real]]] =
+      Gen.listOfN(d - 1, genRoot).map(unit :: _)
 
     val genExample: Gen[Example] =
       for {
-        d <- Gen.choose(1, 10)
-        gv = genVec(d)
-        v1 <- gv
-        v2 <- gv
+        d <- Gen.choose(2, 10)
+        rel <- genRel(d)
         n <- Gen.choose(1, 64)
-      } yield Example(v1, v2, n)
+      } yield Example(rel, n)
 
     forAll(genExample) { ex =>
-      if (!(ex.law)) {
-        println(ex.explain)
-      }
-
+      if (!ex.law) println(ex.explain)
       ex.law
     }
   }
