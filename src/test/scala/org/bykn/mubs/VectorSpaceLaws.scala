@@ -3,7 +3,9 @@ package org.bykn.mubs
 import algebra.ring.Ring
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import org.scalacheck.Gen
+import org.scalacheck.Prop
 import org.scalacheck.Prop.forAll
+import org.scalacheck.Test
 import spire.math.{Complex, Real}
 import scala.concurrent.Future
 
@@ -338,6 +340,159 @@ class VectorSpaceLaws extends munit.ScalaCheckSuite {
       .foreach { case (b1, b2) =>
         assert(areApproxUnbiased(b1, b2))
       }
+  }
+
+  test("counterexample: epsUb can reject an exact-unbiased pair after quantization") {
+    val d = 4
+    val n = 10
+    val dReal = Real(d)
+    val sqrtD = dReal.sqrt
+    val space10 = new VectorSpace.Space[BinNat._10, Cyclotomic.L10](d, 30)
+    val roots = (0 until n).map { i =>
+      expITheta(Real(2 * i) * Real.pi / Real(n))
+    }
+
+    // This is a concrete construction of an exact-unbiased pair:
+    // u = [1, 1, 1, 1]
+    // v = [1, e^{i a}, e^{i b}, e^{i c}]
+    // with |<u, v>| = sqrt(4) = 2 (up to tiny numeric tolerance).
+    val a = Real(4.023471643764941)
+    val b = Real(4.076187783176535)
+    val c = Real(-0.2904688716913548)
+
+    val u: List[Complex[Real]] = List.fill(d)(unit)
+    val v: List[Complex[Real]] = List(unit, expITheta(a), expITheta(b), expITheta(c))
+
+    val exactAbs = dot2(u, v).sqrt
+    assert((exactAbs - sqrtD).abs.compare(Real(1e-9)) <= 0, s"expected exact unbiased pair, got |<u,v>| = $exactAbs")
+
+    val quantV = v.map(nearest(_, roots))
+    val quantAbs = dot2(u, quantV).sqrt
+    val dev = (quantAbs - sqrtD).abs
+
+    // This is the old quant-table assumption. We intentionally assert it here
+    // to expose that the current epsUb can be too small.
+    assert(
+      dev.compare(space10.epsUb) <= 0,
+      s"counterexample found: dev=$dev > epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, quantV=$quantV")
+  }
+
+  property("for exact-unbiased d=4 pairs, quantization to n=10 should stay within epsUb (counterexample expected)") {
+    val d = 4
+    val n = 10
+    val dReal = Real(d)
+    val sqrtD = dReal.sqrt
+    val space10 = new VectorSpace.Space[BinNat._10, Cyclotomic.L10](d, 30)
+    val roots = (0 until n).map { i =>
+      expITheta(Real(2 * i) * Real.pi / Real(n))
+    }
+
+    // Build exact-unbiased vectors:
+    // u = [1, 1, 1, 1]
+    // v = [1, e^{i a}, e^{i b}, e^{i c}]
+    // where c is solved so that |<u, v>| = 2 exactly (up to tiny tolerance).
+    //
+    // We also restrict c near 0 so quantization is likely to create counterexamples.
+    def buildExactUnbiased(a: Double, b: Double): Option[List[Complex[Real]]] = {
+      val ax = 1.0 + math.cos(a) + math.cos(b)
+      val ay = math.sin(a) + math.sin(b)
+      val amag = math.hypot(ax, ay)
+
+      if (amag <= 1e-12) None
+      else {
+        val rhs = (3.0 - (amag * amag)) / 2.0
+        val cosTheta = rhs / amag
+
+        if ((cosTheta < -1.0) || (cosTheta > 1.0)) None
+        else {
+          val theta = math.acos(math.max(-1.0, math.min(1.0, cosTheta)))
+          val phi = math.atan2(ay, ax)
+          val c0 = phi + theta
+          val c =
+            if (c0 <= -math.Pi) c0 + (2.0 * math.Pi)
+            else if (c0 > math.Pi) c0 - (2.0 * math.Pi)
+            else c0
+
+          // keep c in the quantization bucket near angle 0
+          if (math.abs(c) <= (math.Pi / n)) {
+            Some(List(unit, expITheta(Real(a)), expITheta(Real(b)), expITheta(Real(c))))
+          } else None
+        }
+      }
+    }
+
+    val genPair: Gen[(List[Complex[Real]], List[Complex[Real]])] =
+      Gen
+        .zip(
+          Gen.choose(200.0, 240.0),
+          Gen.choose(200.0, 240.0))
+        .map { case (adeg, bdeg) =>
+          val a = adeg * math.Pi / 180.0
+          val b = bdeg * math.Pi / 180.0
+          buildExactUnbiased(a, b)
+        }
+        .retryUntil(_.isDefined)
+        .map { optV =>
+          val v = optV.get
+          val u = List.fill(d)(unit)
+          (u, v)
+        }
+
+    forAll(genPair) { case (u, v) =>
+      val exactAbs = dot2(u, v).sqrt
+      val exactUnbiased = (exactAbs - sqrtD).abs.compare(Real(1e-9)) <= 0
+      assert(exactUnbiased, s"expected exact unbiased pair, got |<u,v>| = $exactAbs")
+
+      val quantU = u.map(nearest(_, roots))
+      val quantV = v.map(nearest(_, roots))
+      val quantAbs = dot2(quantU, quantV).sqrt
+      val dev = (quantAbs - sqrtD).abs
+
+      val law = dev.compare(space10.epsUb) <= 0
+      if (!law) {
+        println(s"counterexample: dev=$dev, epsUb=${space10.epsUb}, exactAbs=$exactAbs, quantAbs=$quantAbs, v=$v")
+      }
+      law
+    }
+  }
+
+  property("random d=4 vectors in 4th roots: exact-unbiased implies quantized(n=10) stays unbiased") {
+    val d = 4
+    val n = 10
+    val sqrtD = Real(d).sqrt
+    val epsUb = Real(2) * sqrtD * Real.sin(Real.pi / (2 * n))
+    val roots4 = (0 until 4).map { i =>
+      expITheta(Real(2 * i) * Real.pi / Real(4))
+    }.toList
+    val roots10 = (0 until n).map { i =>
+      expITheta(Real(2 * i) * Real.pi / Real(n))
+    }
+
+    val genRoot4 = Gen.oneOf(roots4)
+    val genVec4 = Gen.listOfN(d, genRoot4)
+    val genPair = Gen.zip(genVec4, genVec4)
+
+    val law = Prop.forAll(genPair) { case (v1, v2) =>
+      val exactAbs = dot2(v1, v2).sqrt
+      val isExactUnbiased = (exactAbs - sqrtD).abs.compare(Real(1e-12)) <= 0
+
+      if (!isExactUnbiased) true
+      else {
+        val q1 = v1.map(nearest(_, roots10))
+        val q2 = v2.map(nearest(_, roots10))
+        val quantAbs = dot2(q1, q2).sqrt
+        val dev = (quantAbs - sqrtD).abs
+        dev.compare(epsUb) <= 0
+      }
+    }
+
+    val params =
+      scalaCheckTestParameters
+        .withMinSuccessfulTests(20000)
+        .withMaxDiscardRatio(50)
+
+    val result = Test.check(params, law)
+    assert(result.passed, result.toString)
   }
 
   property("if we quantize to nearest root of unity, the inner product error is <= eps with eps = 2d sin(pi/n)") {

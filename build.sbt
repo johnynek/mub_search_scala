@@ -1,6 +1,6 @@
 import Dependencies._
 
-ThisBuild / scalaVersion     := "2.13.15"
+ThisBuild / scalaVersion     := "2.13.16"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
 ThisBuild / organization     := "com.example"
 ThisBuild / organizationName := "example"
@@ -18,10 +18,9 @@ lazy val root = (project in file("."))
       "org.scalameta" %% "munit-scalacheck" % "1.0.0" % Test,
       "org.scalacheck" %% "scalacheck" % "1.18.1" % Test,
     ),
-    scalacOptions ++= Seq(
-      "-opt:l:inline",
-      "-opt-inline-from:**"
-    ),
+    // Scala 2 optimizer flags are brittle on the latest JDKs (e.g. Java 25).
+    // Keep defaults for reliable local/test compiles.
+    scalacOptions ++= Seq(),
     testFrameworks += new TestFramework("munit.Framework"),
     assembly / test := {}
   )
