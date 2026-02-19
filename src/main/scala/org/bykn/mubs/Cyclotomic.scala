@@ -246,6 +246,23 @@ object Cyclotomic {
       }
   }
 
+  /**
+   * (w')^7 = w
+   * this is a1 + w' * a2 + ... + (w')^6 * a7
+   */
+  case class Root7[C](a1: C, a2: C, a3: C, a4: C, a5: C, a6: C, a7: C) extends Indexed[C] {
+    def apply(idx: Int): C =
+      idx match {
+        case 0 => a1
+        case 1 => a2
+        case 2 => a3
+        case 3 => a4
+        case 4 => a5
+        case 5 => a6
+        case 6 => a7
+      }
+  }
+
   type L1 = SafeLong
 
   // 2 = 2nd roots (1, -1)
@@ -291,6 +308,11 @@ object Cyclotomic {
   implicit val root12CycSL: Cyclotomic[BinNat._12, L12] =
     root3IsCyclotomic
 
+  // 2 * 7 = 14
+  type L14 = Root7[L2]
+  implicit val root14CycSL: Cyclotomic[BinNat._14, L14] =
+    root7IsCyclotomic
+
   // 3*5 = 15
   type L15 = Root5[L3]
   implicit val root15CycSL: Cyclotomic[BinNat._15, L15] =
@@ -310,6 +332,11 @@ object Cyclotomic {
   type L20 = Root5[L4]
   implicit val root20CycSL: Cyclotomic[BinNat._20, L20] =
     root5IsCyclotomic[BinNat._4, L4, BinNat._20]
+
+  // 3 * 7 = 21
+  type L21 = Root7[L3]
+  implicit val root21CycSL: Cyclotomic[BinNat._21, L21] =
+    root7IsCyclotomic[BinNat._3, L3, BinNat._21]
 
   // 3 * 8 = 24
   type L24 = Root3[L8]
@@ -837,5 +864,171 @@ object Cyclotomic {
 
     }
 
-}
+  def root7IsCyclotomic[N <: BinNat, C, O <: BinNat](implicit C: Cyclotomic[N, C], p: BinNat.Mult.Aux[BinNat._7, N, O], ct: ClassTag[C]): Cyclotomic[O, Root7[C]] =
+    new Cyclotomic[O, Root7[C]] {
+      def plus(left: Root7[C], right: Root7[C]): Root7[C] =
+        if (left eq zero) right
+        else if (right eq zero) left
+        else
+          Root7(
+            C.plus(left.a1, right.a1),
+            C.plus(left.a2, right.a2),
+            C.plus(left.a3, right.a3),
+            C.plus(left.a4, right.a4),
+            C.plus(left.a5, right.a5),
+            C.plus(left.a6, right.a6),
+            C.plus(left.a7, right.a7)
+          )
 
+      override def minus(left: Root7[C], right: Root7[C]): Root7[C] =
+        Root7(
+          C.minus(left.a1, right.a1),
+          C.minus(left.a2, right.a2),
+          C.minus(left.a3, right.a3),
+          C.minus(left.a4, right.a4),
+          C.minus(left.a5, right.a5),
+          C.minus(left.a6, right.a6),
+          C.minus(left.a7, right.a7)
+        )
+
+      def times(left: Root7[C], right: Root7[C]): Root7[C] =
+        if ((left eq zero) || (right eq zero)) zero
+        else if (left eq one) right
+        else if (right eq one) left
+        else {
+          val res = new Array[C](7)
+          prod(left, right, res, C, 7)
+          Root7(res(0), res(1), res(2), res(3), res(4), res(5), res(6))
+        }
+
+      def timesOmega(c: Root7[C]): Root7[C] =
+        if (c eq zero) zero
+        else if (c eq one) omega
+        else if (c eq omega) omega2
+        else if (c eq omega2) omega3
+        else if (c eq omega3) omega4
+        else if (c eq omega4) omega5
+        else if (c eq omega5) omega6
+        else Root7(C.timesOmega(c.a7), c.a1, c.a2, c.a3, c.a4, c.a5, c.a6)
+
+      def negate(c: Root7[C]) =
+        if (c eq zero) zero
+        else Root7(C.negate(c.a1), C.negate(c.a2), C.negate(c.a3), C.negate(c.a4), C.negate(c.a5), C.negate(c.a6), C.negate(c.a7))
+
+      private def reWith(rePow: Real, imPow: Real, c: C): Real =
+        (rePow * C.re(c)) - (imPow * C.im(c))
+
+      private def imWith(rePow: Real, imPow: Real, c: C): Real =
+        (imPow * C.re(c)) + (rePow * C.im(c))
+
+      def re(c: Root7[C]): Real =
+        if (c eq zero) Real.zero
+        else if (c eq one) Real.one
+        else if (c eq omega) reOmega
+        else {
+          reWith(rePowers(0), imPowers(0), c.a1) +
+          reWith(rePowers(1), imPowers(1), c.a2) +
+          reWith(rePowers(2), imPowers(2), c.a3) +
+          reWith(rePowers(3), imPowers(3), c.a4) +
+          reWith(rePowers(4), imPowers(4), c.a5) +
+          reWith(rePowers(5), imPowers(5), c.a6) +
+          reWith(rePowers(6), imPowers(6), c.a7)
+        }
+
+      def im(c: Root7[C]): Real =
+        if ((c eq zero) || (c eq one)) Real.zero
+        else if (c eq omega) imOmega
+        else {
+          imWith(rePowers(0), imPowers(0), c.a1) +
+          imWith(rePowers(1), imPowers(1), c.a2) +
+          imWith(rePowers(2), imPowers(2), c.a3) +
+          imWith(rePowers(3), imPowers(3), c.a4) +
+          imWith(rePowers(4), imPowers(4), c.a5) +
+          imWith(rePowers(5), imPowers(5), c.a6) +
+          imWith(rePowers(6), imPowers(6), c.a7)
+        }
+
+      def elemTimes(c: C, r: Root7[C]): Root7[C] =
+        Root7(
+          C.times(c, r.a1),
+          C.times(c, r.a2),
+          C.times(c, r.a3),
+          C.times(c, r.a4),
+          C.times(c, r.a5),
+          C.times(c, r.a6),
+          C.times(c, r.a7))
+
+      def conj(c: Root7[C]): Root7[C] = {
+        val ca1 = Root7(C.conj(c.a1), C.zero, C.zero, C.zero, C.zero, C.zero, C.zero)
+        val ca2 = elemTimes(C.conj(c.a2), omegaConj)
+        val ca3 = elemTimes(C.conj(c.a3), omega2Conj)
+        val ca4 = elemTimes(C.conj(c.a4), omega3Conj)
+        val ca5 = elemTimes(C.conj(c.a5), omega4Conj)
+        val ca6 = elemTimes(C.conj(c.a6), omega5Conj)
+        val ca7 = elemTimes(C.conj(c.a7), omega6Conj)
+
+        sum(ca1 :: ca2 :: ca3 :: ca4 :: ca5 :: ca6 :: ca7 :: Nil)
+      }
+
+      def abs2(c: Root7[C]): Real =
+        if (c eq zero) Real.zero
+        else if ((c eq one) || (c eq omega)) Real.one
+        else {
+          val r = re(c)
+          val i = im(c)
+          (r * r) + (i * i)
+        }
+
+      val zero = Root7(C.zero, C.zero, C.zero, C.zero, C.zero, C.zero, C.zero)
+      val one = Root7(C.one, C.zero, C.zero, C.zero, C.zero, C.zero, C.zero)
+
+      val omega: Root7[C] = Root7(C.zero, C.one, C.zero, C.zero, C.zero, C.zero, C.zero)
+      val omega2: Root7[C] = Root7(C.zero, C.zero, C.one, C.zero, C.zero, C.zero, C.zero)
+      val omega3: Root7[C] = Root7(C.zero, C.zero, C.zero, C.one, C.zero, C.zero, C.zero)
+      val omega4: Root7[C] = Root7(C.zero, C.zero, C.zero, C.zero, C.one, C.zero, C.zero)
+      val omega5: Root7[C] = Root7(C.zero, C.zero, C.zero, C.zero, C.zero, C.one, C.zero)
+      val omega6: Root7[C] = Root7(C.zero, C.zero, C.zero, C.zero, C.zero, C.zero, C.one)
+
+      val thisSize = C.roots.length * 7
+      val omegaConj = pow(omega, thisSize - 1)
+      val omega2Conj = pow(omega2, thisSize - 1)
+      val omega3Conj = pow(omega3, thisSize - 1)
+      val omega4Conj = pow(omega4, thisSize - 1)
+      val omega5Conj = pow(omega5, thisSize - 1)
+      val omega6Conj = pow(omega6, thisSize - 1)
+
+      val theta: Real =
+        Real.acos(C.reOmega) / Real(7)
+
+      val reOmega: Real = Real.cos(theta)
+      val imOmega: Real = Real.sin(theta)
+
+      val (rePowers, imPowers): (Array[Real], Array[Real]) = {
+        val reArr = new Array[Real](7)
+        val imArr = new Array[Real](7)
+
+        reArr(0) = Real.one
+        imArr(0) = Real.zero
+        reArr(1) = reOmega
+        imArr(1) = imOmega
+
+        var idx = 2
+        while (idx < 7) {
+          val prevRe = reArr(idx - 1)
+          val prevIm = imArr(idx - 1)
+          reArr(idx) = (prevRe * reOmega) - (prevIm * imOmega)
+          imArr(idx) = (prevIm * reOmega) + (prevRe * imOmega)
+          idx = idx + 1
+        }
+
+        (reArr, imArr)
+      }
+
+      val roots: Vector[Root7[C]] =
+        (1 until thisSize).scanLeft(one) { (prev, _) =>
+          timesOmega(prev)
+        }
+        .toVector
+    }
+
+}

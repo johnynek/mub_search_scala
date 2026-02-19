@@ -99,63 +99,58 @@ object MubBuild {
       val basisi = bases(i)._1
       val mini = if (basisi.isEmpty) vec else basisi.last
 
-      bases
-        .toList
-        .traverse {
-          case (basis, (vecs, s)) =>
-            val sortBasis =
-              if (0 < basis) {
-                if (basis < i) {
-                  // the min value of this
-                  // basis has to be <= vec
-                  val bprev = bases(basis - 1)._1
-                  bprev.isEmpty || (bprev.last <= mini)
-                }
-                else if (basis > i) {
-                  val bprev = bases(basis - 1)._1
-                  bprev.isEmpty || (mini <= bprev.last)
-                }
-                else true
-              }
-              else true
-
-            if (!sortBasis) None
-            else if (basis == i) {
-              // we add in sorted order
-              val s0 = s.rangeFrom(vec + 1)
-              val s1 = s0.filter(orthFn(vec, _))
-
-              val nextLen = vecs.length + 1
-              if ((s1.size + nextLen) < dim) {
-                // we can't reach a complete set
-                None
-              }
-              else {
-                val v1 = vec :: vecs
-                val s2 = if (nextLen >= dim) SortedSet.empty[Int] else s1
-                def next = Some((basis, (v1, s2)))
-
-                if (nextLen > 2) {
-                  // we have filled a basis, we only keep this if we match the hash
-                  if (filterFn(v1)) next
-                  else None
-                }
-                else next
-              }
+      val bldr = Map.newBuilder[Int, (List[Int], SortedSet[Int])]
+      val it = hads.iterator
+      while (it.hasNext) {
+        val basis = it.next()
+        val (vecs, s) = bases(basis)
+        val sortBasis =
+          if (0 < basis) {
+            if (basis < i) {
+              // the min value of this
+              // basis has to be <= vec
+              val bprev = bases(basis - 1)._1
+              bprev.isEmpty || (bprev.last <= mini)
             }
-            else {
-              val s1 = s.filter(unbiasedFn(vec, _))
-
-              if ((s1.size + vecs.length) < dim) {
-                // we can't reach a complete set
-                None
-              }
-              else {
-                Some((basis, (vecs, s1)))
-              }
+            else if (basis > i) {
+              val bprev = bases(basis - 1)._1
+              bprev.isEmpty || (mini <= bprev.last)
             }
+            else true
+          }
+          else true
+
+        if (!sortBasis) return None
+        else if (basis == i) {
+          // we add in sorted order
+          val s0 = s.rangeFrom(vec + 1)
+          val s1 = s0.filter(orthFn(vec, _))
+          val nextLen = vecs.length + 1
+          if ((s1.size + nextLen) < dim) {
+            // we can't reach a complete set
+            return None
+          }
+
+          val v1 = vec :: vecs
+          // Partition exactly once at a canonical point so workers are
+          // disjoint/exhaustive over branches. Re-checking at deeper levels
+          // can prune valid branches from every worker.
+          if ((basis == 0) && (nextLen == 3) && !filterFn(v1)) return None
+          val s2 = if (nextLen >= dim) SortedSet.empty[Int] else s1
+          bldr += ((basis, (v1, s2)))
         }
-        .map(_.toMap)
+        else {
+          val s1 = s.filter(unbiasedFn(vec, _))
+          if ((s1.size + vecs.length) < dim) {
+            // we can't reach a complete set
+            return None
+          }
+
+          bldr += ((basis, (vecs, s1)))
+        }
+      }
+
+      Some(bldr.result())
     }
 
     private[this] val hads = (0 until goalHads).toList
@@ -220,18 +215,25 @@ object MubBuild {
         // we can choose the order in which we search. We don't have to search all of the bases
         // we can select which of the bases we search next
 
-        val smallestBranch =
-          hads.sortBy { i =>
-              val cnt = extensionSize(b, i)
-              if (cnt > 0) cnt
-              else Int.MaxValue // put 0 last, it can't be extended
-            }
-            .head
+        var smallestBranch = -1
+        var smallestSize = Int.MaxValue
+        val hit = hads.iterator
+        while (hit.hasNext) {
+          val i = hit.next()
+          val cnt = extensionSize(b, i)
+          if ((cnt > 0) && (cnt < smallestSize)) {
+            smallestBranch = i
+            smallestSize = cnt
+          }
+        }
 
-        extendBasis(b, smallestBranch, depth).flatMap {
-          case n @ Tree.NonEmpty(_, _) =>
-            Some(Tree.NonEmpty(b, LazyList(n)))
-          case _ => None
+        if (smallestBranch < 0) None
+        else {
+          extendBasis(b, smallestBranch, depth).flatMap {
+            case n @ Tree.NonEmpty(_, _) =>
+              Some(Tree.NonEmpty(b, LazyList(n)))
+            case _ => None
+          }
         }
 
         /*

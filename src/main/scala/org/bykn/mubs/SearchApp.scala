@@ -48,7 +48,7 @@ object SearchApp extends CommandApp(
       .mapValidated { d =>
 
         val validSizes: List[Int] =
-          List(2, 3, 4, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 27, 30, 32, 36)
+          List(2, 3, 4, 6, 8, 9, 10, 12, 14, 15, 16, 18, 20, 21, 24, 27, 30, 32, 36)
 
         if (validSizes.contains(d)) Validated.valid {
           d match {
@@ -60,10 +60,12 @@ object SearchApp extends CommandApp(
             case 9 => { (d: Int, bits: Int) => new Space[BinNat._9, Cyclotomic.L9](d, bits) }
             case 10 => { (d: Int, bits: Int) => new Space[BinNat._10, Cyclotomic.L10](d, bits) }
             case 12 => { (d: Int, bits: Int) => new Space[BinNat._12, Cyclotomic.L12](d, bits) }
+            case 14 => { (d: Int, bits: Int) => new Space[BinNat._14, Cyclotomic.L14](d, bits) }
             case 15 => { (d: Int, bits: Int) => new Space[BinNat._15, Cyclotomic.L15](d, bits) }
             case 16 => { (d: Int, bits: Int) => new Space[BinNat._16, Cyclotomic.L16](d, bits) }
             case 18 => { (d: Int, bits: Int) => new Space[BinNat._18, Cyclotomic.L18](d, bits) }
             case 20 => { (d: Int, bits: Int) => new Space[BinNat._20, Cyclotomic.L20](d, bits) }
+            case 21 => { (d: Int, bits: Int) => new Space[BinNat._21, Cyclotomic.L21](d, bits) }
             case 24 => { (d: Int, bits: Int) => new Space[BinNat._24, Cyclotomic.L24](d, bits) }
             case 27 => { (d: Int, bits: Int) => new Space[BinNat._27, Cyclotomic.L27](d, bits) }
             case 30 => { (d: Int, bits: Int) => new Space[BinNat._30, Cyclotomic.L30](d, bits) }
