@@ -2,7 +2,6 @@ package org.bykn.mubs
 
 import cats.data.OneAnd
 import java.util.BitSet
-import scala.collection.immutable.SortedSet
 import org.typelevel.paiges.Doc
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.{ExecutionContext, Future}
@@ -30,7 +29,8 @@ object MubBuild {
    * For each basis (key) we have the current set of values
    * and all possible extensions
    */
-  type Bases = Map[Int, (List[Int], SortedSet[Int])]
+  type Candidates = Array[Int]
+  type Bases = Array[(List[Int], Candidates)]
 
   class Instance(
     val dim: Int,
@@ -58,31 +58,114 @@ object MubBuild {
       orthBitSet.get(cpFn(i, j))
 
     def docBases(bases: Bases): Doc = {
-      Doc.intercalate(Doc.line, bases.toList.map { case (idx, (basis, candidates)) =>
+      val parts = (0 until goalHads).map { idx =>
+        val (basis, candidates) = bases(idx)
         Doc.text(s"$idx. ") + Doc.char('[') +
           (Doc.line + Doc.intercalate(Doc.line, basis.map(Doc.str(_))) + Doc.line).nested(4).grouped +
-          Doc.char(']') + Doc.text(s" candidate_size=${candidates.size}") 
-      })
+          Doc.char(']') + Doc.text(s" candidate_size=${candidates.length}")
+      }
+      Doc.intercalate(Doc.line, parts)
     }
 
     def unbiasedFn(i: Int, j: Int): Boolean =
       ubBitSet.get(cpFn(i, j))
 
-    def bitSetToSet(bitset: BitSet): SortedSet[Int] = {
+    private[this] val EmptyCandidates: Candidates = Array.emptyIntArray
+
+    private def bitSetToArray(bitset: BitSet): Candidates = {
+      val res = new Array[Int](bitset.cardinality())
+      var write = 0
       var idx = bitset.nextSetBit(0)
-      val bldr = SortedSet.newBuilder[Int]
       while ((idx < standardCount) && (idx >= 0)) {
-        bldr += idx
+        res(write) = idx
+        write = write + 1
         idx = bitset.nextSetBit(idx + 1)
       }
-      bldr.result()
+      if (write == res.length) res
+      else java.util.Arrays.copyOf(res, write)
     }
 
-    val orthToZero: SortedSet[Int] = bitSetToSet(orthBitSet)
-    val ubToZero: SortedSet[Int] = bitSetToSet(ubBitSet)
+    private def firstIndexGte(cands: Candidates, minVal: Int): Int = {
+      val raw = java.util.Arrays.binarySearch(cands, minVal)
+      if (raw >= 0) raw
+      else -raw - 1
+    }
+
+    private def filterCandidates(
+      cands: Candidates,
+      startIdx: Int,
+      vec: Int,
+      useOrth: Boolean): Candidates = {
+
+      val len = cands.length
+      if (startIdx >= len) EmptyCandidates
+      else {
+        var out = new Array[Int](math.min(128, len - startIdx))
+        var size = 0
+        var idx = startIdx
+
+        while (idx < len) {
+          val cand = cands(idx)
+          val accept =
+            if (useOrth) orthFn(vec, cand)
+            else unbiasedFn(vec, cand)
+
+          if (accept) {
+            if (size == out.length) {
+              val nextLen =
+                if (out.length < 8) 8
+                else out.length * 2
+              out = java.util.Arrays.copyOf(out, nextLen)
+            }
+            out(size) = cand
+            size = size + 1
+          }
+          idx = idx + 1
+        }
+
+        if (size == 0) EmptyCandidates
+        else if (size == out.length) out
+        else java.util.Arrays.copyOf(out, size)
+      }
+    }
+
+    private def filterOrthCandidates(cands: Candidates, vec: Int): Candidates = {
+      val startIdx = firstIndexGte(cands, vec + 1)
+      filterCandidates(cands, startIdx, vec, useOrth = true)
+    }
+
+    private def filterUnbiasedCandidates(cands: Candidates, vec: Int): Candidates =
+      filterCandidates(cands, 0, vec, useOrth = false)
+
+    private def candidatesFromPredicate(fn: Int => Boolean): Candidates = {
+      var out = new Array[Int](1024)
+      var size = 0
+      var idx = 0
+      while (idx < standardCount) {
+        if (fn(idx)) {
+          if (size == out.length) {
+            out = java.util.Arrays.copyOf(out, out.length * 2)
+          }
+          out(size) = idx
+          size = size + 1
+        }
+        idx = idx + 1
+      }
+      if (size == out.length) out
+      else java.util.Arrays.copyOf(out, size)
+    }
+
+    val orthToZero: Candidates = bitSetToArray(orthBitSet)
+    val ubToZero: Candidates = bitSetToArray(ubBitSet)
 
     def forBasis(bases: Bases, i: Int): List[Int] =
       bases(i)._1
+
+    private def toBasisMap(b: Bases): Map[Int, List[Int]] =
+      (0 until goalHads).iterator.map { i =>
+        (i, b(i)._1)
+      }
+      .toMap
 
     def addVector(bases: Bases, i: Int, vec: Int): Option[Bases] = {
       val currentCount = addVectorCount.incrementAndGet()
@@ -99,10 +182,9 @@ object MubBuild {
       val basisi = bases(i)._1
       val mini = if (basisi.isEmpty) vec else basisi.last
 
-      val bldr = Map.newBuilder[Int, (List[Int], SortedSet[Int])]
-      val it = hads.iterator
-      while (it.hasNext) {
-        val basis = it.next()
+      val next = new Array[(List[Int], Candidates)](goalHads)
+      var basis = 0
+      while (basis < goalHads) {
         val (vecs, s) = bases(basis)
         val sortBasis =
           if (0 < basis) {
@@ -123,37 +205,39 @@ object MubBuild {
         if (!sortBasis) return None
         else if (basis == i) {
           // we add in sorted order
-          val s0 = s.rangeFrom(vec + 1)
-          val s1 = s0.filter(orthFn(vec, _))
           val nextLen = vecs.length + 1
-          if ((s1.size + nextLen) < dim) {
-            // we can't reach a complete set
-            return None
-          }
-
           val v1 = vec :: vecs
           // Partition exactly once at a canonical point so workers are
           // disjoint/exhaustive over branches. Re-checking at deeper levels
           // can prune valid branches from every worker.
           if ((basis == 0) && (nextLen == 3) && !filterFn(v1)) return None
-          val s2 = if (nextLen >= dim) SortedSet.empty[Int] else s1
-          bldr += ((basis, (v1, s2)))
+
+          if (nextLen >= dim) {
+            next(basis) = (v1, EmptyCandidates)
+          }
+          else {
+            val s1 = filterOrthCandidates(s, vec)
+            if ((s1.length + nextLen) < dim) {
+              // we can't reach a complete set
+              return None
+            }
+            next(basis) = (v1, s1)
+          }
         }
         else {
-          val s1 = s.filter(unbiasedFn(vec, _))
-          if ((s1.size + vecs.length) < dim) {
+          val s1 = filterUnbiasedCandidates(s, vec)
+          if ((s1.length + vecs.length) < dim) {
             // we can't reach a complete set
             return None
           }
 
-          bldr += ((basis, (vecs, s1)))
+          next(basis) = (vecs, s1)
         }
+        basis = basis + 1
       }
 
-      Some(bldr.result())
+      Some(next)
     }
-
-    private[this] val hads = (0 until goalHads).toList
 
     type TreeB = Tree[LazyList, Bases]
 
@@ -166,13 +250,17 @@ object MubBuild {
       }
 
     // this is true, we found a complete set, we might as well stop
-    def isComplete(b: Bases): Boolean =
-      hads.forall { basis =>
-        forBasis(b, basis).length == dim
+    def isComplete(b: Bases): Boolean = {
+      var basis = 0
+      while (basis < goalHads) {
+        if (forBasis(b, basis).length != dim) return false
+        basis = basis + 1
       }
+      true
+    }
 
     def extensionSize(b: Bases, i: Int): Int =
-      b(i)._2.size
+      b(i)._2.length
 
     // fully extend an incomplete basis
     private def extendBasis(b: Bases, i: Int, depth: Int): Option[TreeB] = {
@@ -184,9 +272,9 @@ object MubBuild {
         None
       }
       else {
-        val branchWidth = b(i)._2.size
+        val branchWidth = b(i)._2.length
         // make this a def so the head can be GCe'd below
-        def choices = b(i)._2.to(LazyList)
+        def choices = b(i)._2.iterator.to(LazyList)
 
         def extension(vec: Int): Option[Tree.NonEmpty[LazyList, Bases]] =
           addVector(b, i, vec).flatMap(extendFully(_, depth + 1))
@@ -217,14 +305,14 @@ object MubBuild {
 
         var smallestBranch = -1
         var smallestSize = Int.MaxValue
-        val hit = hads.iterator
-        while (hit.hasNext) {
-          val i = hit.next()
+        var i = 0
+        while (i < goalHads) {
           val cnt = extensionSize(b, i)
           if ((cnt > 0) && (cnt < smallestSize)) {
             smallestBranch = i
             smallestSize = cnt
           }
+          i = i + 1
         }
 
         if (smallestBranch < 0) None
@@ -257,11 +345,10 @@ object MubBuild {
     }
 
     val initBasis: Bases =
-      hads.map {
-        case 0 => (0, (0 :: Nil, orthToZero))
-        case i => (i, (Nil, ubToZero))
+      Array.tabulate(goalHads) {
+        case 0 => (0 :: Nil, orthToZero)
+        case _ => (Nil, ubToZero)
       }
-      .toMap
 
 
     /**
@@ -328,19 +415,14 @@ object MubBuild {
         .sortBy(sortFn) match {
         case (Nil | (Nil :: _)) => Left("did not expect empty, or empty lists early")
         case (h :: tail) :: brest =>
-          def toSS(it: Iterator[Int]): SortedSet[Int] = {
-            val ss = SortedSet.newBuilder[Int]
-            ss ++= it
-            ss.result()
-          }
+          val orthToH = candidatesFromPredicate { left => orthBitSet.get(cpFn(left, h)) }
+          val ubToH = candidatesFromPredicate { left => ubBitSet.get(cpFn(left, h)) }
 
-          val orthToH = toSS((0 until standardCount).iterator.filter { left => orthBitSet.get(cpFn(left, h)) })
-          val ubToH = toSS((0 until standardCount).iterator.filter { left => ubBitSet.get(cpFn(left, h)) })
-
-          val b0 = (0 until goalHads).foldLeft(Map.empty: Bases) { (m, basis) =>
-            if (basis == 0) m.updated(0, (h :: Nil, orthToH))
-            else m.updated(basis, (Nil, ubToH))
-          }
+          val b0: Bases =
+            Array.tabulate(goalHads) {
+              case 0 => (h :: Nil, orthToH)
+              case _ => (Nil, ubToH)
+            }
 
         (tail :: brest).zipWithIndex.foldM(b0) { case (bases, (vectors, basis)) =>
           vectors.foldM(bases) { (b, v) =>
@@ -356,12 +438,12 @@ object MubBuild {
     def findFirstCompleteExampleFrom(b: Bases): Option[Map[Int, List[Int]]] =
       extendFully(b, 0)
         .flatMap(firstComplete(_))
-        .map(_.map { case (k, (v, _)) => (k, v) })
+        .map(toBasisMap(_))
 
     case class Result(fullBases: List[Tree.NonEmpty[LazyList, Bases]]) {
       lazy val firstCompleteExample: Option[Map[Int, List[Int]]] =
         fullBases.flatMap(firstComplete(_))
-          .map(_.map { case (k, (v, _)) => (k, v) })
+          .map(toBasisMap(_))
           .headOption
 
       lazy val completeCount: Long = {
@@ -390,19 +472,28 @@ object MubBuild {
         require(threads > 0, s"require threads $threads > 0")
 
         // round up by adding 1
-        val chunkSize = (orthToZero.size / threads) + 1
-        require(chunkSize * threads >= orthToZero.size)
+        val chunkSize = (orthToZero.length / threads) + 1
+        require(chunkSize * threads >= orthToZero.length)
 
-        val nextList = orthToZero.toList
+        val nextList = orthToZero
 
         Future.traverse((0 until threads).toVector) { part =>
           Future {
             val offset = chunkSize * part
-          
-            nextList.drop(offset).take(chunkSize).flatMap { i =>
-              addVector(initBasis, 0, i)
+
+            val end = math.min(offset + chunkSize, nextList.length)
+            val bldr = List.newBuilder[Tree.NonEmpty[LazyList, Bases]]
+            var idx = offset
+            while (idx < end) {
+              addVector(initBasis, 0, nextList(idx))
                 .flatMap(extendFully(_, 1))
+                .foreach { t =>
+                  bldr += t
+                }
+              idx = idx + 1
             }
+
+            bldr.result()
           }
         }
         .map(rs => Result(rs.toList.flatten))

@@ -24,20 +24,34 @@ object SearchApp extends CommandApp(
 
     val goalMubs = Opts.option[Int]("mubs", "the number of mutually unbiased bases we try to find")
 
+    val directEc =
+      Opts.flag(
+        "direct_ec",
+        "run futures on the current thread via ExecutionContext.parasitic (useful for profiling)")
+        .orFalse
+
     val threadCount: Opts[(Int, (ExecutionContext => Unit) => Unit)] =
       Opts.option[Int]("threads", "number of threads to use, default = number of processors")
         .withDefault(Runtime.getRuntime().availableProcessors())
-        .map { t =>
-          (t, { (callback: ExecutionContext => Unit) =>
-            val eserv = Executors.newFixedThreadPool(t)
-            try {
-              val ec = ExecutionContext.fromExecutorService(eserv)
-              callback(ec)
-            }
-            finally {
-              eserv.shutdown()
-            }
-          })
+        .product(directEc)
+        .map { case (t, runDirect) =>
+          if (runDirect) {
+            (1, { (callback: ExecutionContext => Unit) =>
+              callback(ExecutionContext.parasitic)
+            })
+          }
+          else {
+            (t, { (callback: ExecutionContext => Unit) =>
+              val eserv = Executors.newFixedThreadPool(t)
+              try {
+                val ec = ExecutionContext.fromExecutorService(eserv)
+                callback(ec)
+              }
+              finally {
+                eserv.shutdown()
+              }
+            })
+          }
         }
 
     val threads = threadCount.map(_._2)

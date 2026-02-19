@@ -1171,8 +1171,11 @@ object VectorSpace {
             Vect.crossBasis(Vect.standardBasisDim2[N, K2, C], pairOfDim3)
 
           val asBases = mubBuild.fromVectBasis(bases6)
-          println(s"candidate vectors: ${asBases(2)._2.size}")
-          println(asBases.map { case (k, (v, s)) => (k, (v, s.size)) })
+          println(s"candidate vectors: ${asBases(2)._2.length}")
+          println((0 until 3).map { k =>
+            val (v, s) = asBases(k)
+            (k, (v, s.length))
+          })
 
           def showV(v: Vect[BinNat._6, N, C]): String =
             v.show { c =>
